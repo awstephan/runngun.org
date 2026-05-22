@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { Link } from 'react-router-dom';
-import { Target, ChevronLeft, ChevronRight, Shield } from 'lucide-react';
+import { Target, ChevronLeft, ChevronRight, Shield, Github } from 'lucide-react';
 import { useMonthEvents } from '@/hooks/useMonthEvents';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { EventCard } from '@/components/EventCard';
@@ -295,12 +295,12 @@ const Calendar = () => {
             </Link>
             <span className="text-muted-foreground/40">·</span>
             <a
-              href="https://shakespeare.diy"
+              href="https://github.com/MartialM1nd/runngun.org"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-primary transition-colors"
             >
-              Vibed with Shakespeare
+              <Github className="w-3.5 h-3.5" />
             </a>
           </div>
         </div>

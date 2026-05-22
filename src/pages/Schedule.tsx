@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSeoMeta } from '@unhead/react';
-import { Target, Shield } from 'lucide-react';
+import { Target, Shield, Github } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useCalendarEvents, splitEvents, CalendarEvent } from '@/hooks/useCalendarEvents';
 import { EventCard, EventCardSkeleton } from '@/components/EventCard';
@@ -145,12 +145,12 @@ const Schedule = () => {
             </Link>
             <span className="text-muted-foreground/40">·</span>
             <a
-              href="https://shakespeare.diy"
+              href="https://github.com/MartialM1nd/runngun.org"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-primary transition-colors"
             >
-              Vibed with Shakespeare
+              <Github className="w-3.5 h-3.5" />
             </a>
           </div>
         </div>

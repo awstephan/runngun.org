@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSeoMeta } from '@unhead/react';
-import { Target, Shield, Zap, ChevronDown, ChevronUp, Globe, Key, Server } from 'lucide-react';
+import { Target, Shield, Zap, ChevronDown, ChevronUp, Globe, Key, Server, Github } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useCalendarEvents, splitEvents } from '@/hooks/useCalendarEvents';
 import { EventCard, EventCardSkeleton } from '@/components/EventCard';
@@ -219,12 +219,12 @@ const Index = () => {
             </Link>
             <span className="text-muted-foreground/40">·</span>
             <a
-              href="https://shakespeare.diy"
+              href="https://github.com/MartialM1nd/runngun.org"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-primary transition-colors"
             >
-              Vibed with Shakespeare
+              <Github className="w-3.5 h-3.5" />
             </a>
           </div>
         </div>

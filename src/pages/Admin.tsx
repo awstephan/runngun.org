@@ -16,6 +16,7 @@ import {
   X,
   Server,
   Shield,
+  Github,
 } from 'lucide-react';
 import { nip19 } from 'nostr-tools';
 import { useQueryClient } from '@tanstack/react-query';
@@ -834,12 +835,12 @@ export default function Admin() {
               </Link>
               <span className="text-muted-foreground/40">·</span>
               <a
-                href="https://shakespeare.diy"
+                href="https://github.com/MartialM1nd/runngun.org"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:text-primary transition-colors"
               >
-                Vibed with Shakespeare
+                <Github className="w-3.5 h-3.5" />
               </a>
             </div>
           </div>
