@@ -2,13 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useNostr } from '@nostrify/react';
 import { nip19 } from 'nostr-tools';
 
-function escapeXml(text: string): string {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+import { getAllAdmins } from '@/lib/admins';
+
+function safeCDATA(s: string): string {
+  return s.replace(/]]>/g, ']]]]><![CDATA[>');
 }
 
 const RSS = () => {
@@ -25,7 +22,13 @@ const RSS = () => {
       try {
         const now = Math.floor(Date.now() / 1000);
         const events = await nostr.query([
-          { kinds: [31923], '#t': ['runngun', 'running', 'shooting', 'biathlon'], limit: 50 }
+          {
+            kinds: [31923],
+            authors: getAllAdmins(),
+            '#t': ['runngun', 'running', 'shooting', 'biathlon'],
+            since: now - 365 * 24 * 3600,
+            limit: 50,
+          },
         ]);
 
         const upcoming = events
@@ -72,11 +75,11 @@ const RSS = () => {
 
           return `
     <item>
-      <title><![CDATA[${title}]]></title>
+      <title><![CDATA[${safeCDATA(title)}]]></title>
       <link>${link}</link>
       <guid isPermaLink="true">${link}</guid>
       <pubDate>${pubDate}</pubDate>
-      <description><![CDATA[${description}]]></description>
+      <description><![CDATA[${safeCDATA(description)}]]></description>
       <category>runngun</category>
       <category>biathlon</category>
       <category>shooting</category>

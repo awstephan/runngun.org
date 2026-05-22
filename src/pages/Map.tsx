@@ -63,9 +63,19 @@ async function geocodeLocation(location: string, nostrLocations: Record<string, 
       await new Promise((resolve) => setTimeout(resolve, 1100));
 
       const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(candidate)}&limit=1`
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(candidate)}&limit=1`,
+        {
+          headers: {
+            'User-Agent': 'runngun.org/1.0 (admin@runngun.org)',
+            'Accept': 'application/json',
+          },
+        }
       );
 
+      if (response.status === 429) {
+        await new Promise((r) => setTimeout(r, 5000));
+        continue;
+      }
       if (!response.ok) continue;
 
       const data = await response.json();
@@ -112,7 +122,7 @@ function buildPopupContent(calEvent: CalendarEvent): string {
   });
 
   const escapeHtml = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/`/g, '&#96;');
 
   return `
     <div style="background: #1a1a1a; color: #e5e5e5; border: none; box-shadow: none;">

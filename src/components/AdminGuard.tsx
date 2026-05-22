@@ -21,7 +21,10 @@ export function AdminGuard({ children }: AdminGuardProps) {
 
   const effectiveAdminList = adminList && adminList.length > 0 
     ? adminList 
-    : DEFAULT_ADMIN_PUBKEYS;
+    : (() => {
+        console.warn('AdminGuard: Nostr admin list is empty, falling back to DEFAULT_ADMIN_PUBKEYS');
+        return DEFAULT_ADMIN_PUBKEYS;
+      })();
   
   const isUserAdmin = user 
     ? effectiveAdminList.some(pk => pk.toLowerCase() === user.pubkey.toLowerCase())

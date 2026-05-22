@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useToast } from '@/hooks/useToast';
+import { safeImgUrl } from '@/lib/safeUrl';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -329,10 +330,10 @@ const ImageUploadField: React.FC<ImageUploadFieldProps> = ({
             <Upload className="h-4 w-4 mr-2" />
             Upload Image
           </Button>
-          {field.value && (
+          {(field.value && safeImgUrl(field.value)) && (
             <div className={`h-10 ${previewType === 'square' ? 'w-10' : 'w-24'} rounded overflow-hidden`}>
               <img 
-                src={field.value} 
+                src={field.value}
                 alt={`${label} preview`} 
                 className="h-full w-full object-cover"
               />
