@@ -88,6 +88,13 @@ export function useNWCInternal() {
         isConnected: true,
       };
 
+      console.warn(
+        'NWC connection string stored in localStorage. ' +
+        'This provides convenience at the cost of security. ' +
+        'The wallet secret is accessible to any script on this origin. ' +
+        'Revoke this connection in your wallet if you no longer trust this device.'
+      );
+
       setConnectionInfo(prev => ({
         ...prev,
         [parsed.connectionString]: {

@@ -27,7 +27,7 @@ export function useTemplateMutations(adminPubkeys: string[]) {
 
     try {
       const events = await nostr.query([
-        { kinds: [30078], '#d': [TEMPLATES_DTAG], limit: 1 },
+        { kinds: [30078], authors: adminPubkeys, '#d': [TEMPLATES_DTAG], limit: 1 },
       ]);
 
       let existingTemplates: EventTemplate[] = [];
@@ -79,7 +79,7 @@ export function useTemplateMutations(adminPubkeys: string[]) {
 
     try {
       const events = await nostr.query([
-        { kinds: [30078], '#d': [TEMPLATES_DTAG], limit: 1 },
+        { kinds: [30078], authors: adminPubkeys, '#d': [TEMPLATES_DTAG], limit: 1 },
       ]);
 
       if (events.length === 0) {

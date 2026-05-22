@@ -4,7 +4,7 @@ import { useNostr } from '@nostrify/react';
 import { GEOLOCATION_DTAG } from '@/lib/config';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useToast } from '@/hooks/useToast';
-import { getAllAdmins } from '@/hooks/useAdminList';
+import { SITE_OWNER_PUBKEY } from '@/lib/config';
 import type { GeocodedLocation } from './useGeolocationList';
 
 const GEOCODE_CACHE_KEY = 'runngun:location-cache';
@@ -63,8 +63,7 @@ export function useGeolocationMutations() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const adminPubkeys = getAllAdmins();
-  const isAdmin = user ? adminPubkeys.some(pk => pk.toLowerCase() === user.pubkey.toLowerCase()) : false;
+  const isOwner = user ? user.pubkey.toLowerCase() === SITE_OWNER_PUBKEY.toLowerCase() : false;
 
   const geocodeAndSaveLocation = async (locationString: string) => {
     if (!user) {
@@ -72,8 +71,8 @@ export function useGeolocationMutations() {
       return;
     }
 
-    if (!isAdmin) {
-      toast({ title: 'Not authorized', description: 'Only admins can save geolocations', variant: 'destructive' });
+    if (!isOwner) {
+      toast({ title: 'Not authorized', description: 'Only site owner can save geolocations', variant: 'destructive' });
       return;
     }
 
@@ -83,7 +82,7 @@ export function useGeolocationMutations() {
 
     try {
       const events = await nostr.query([
-        { kinds: [30078], '#d': [GEOLOCATION_DTAG], limit: 1 },
+        { kinds: [30078], authors: [SITE_OWNER_PUBKEY], '#d': [GEOLOCATION_DTAG], limit: 1 },
       ]);
 
       const existingLocations: Record<string, GeocodedLocation> = {};
@@ -145,5 +144,5 @@ export function useGeolocationMutations() {
     }
   };
 
-  return { geocodeAndSaveLocation, isAdmin };
+  return { geocodeAndSaveLocation, isOwner };
 }

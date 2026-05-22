@@ -3,6 +3,7 @@ import { nip19 } from 'nostr-tools';
 import { MapPin, Clock, ExternalLink, Calendar, DollarSign } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import type { CalendarEvent } from '@/hooks/useCalendarEvents';
+import { safeImgUrl } from '@/lib/safeUrl';
 
 interface EventCardProps {
   calEvent: CalendarEvent;
@@ -68,7 +69,8 @@ function getDayNum(start: number): string {
 }
 
 export function EventCard({ calEvent, isPast = false }: EventCardProps) {
-  const { event, title, summary, start, end, startTzid, location, image, price } = calEvent;
+  const { event, title, summary, start, end, startTzid, location, image: rawImage, price } = calEvent;
+  const image = rawImage ? safeImgUrl(rawImage) : null;
 
   // Build naddr for the detail link (CRITICAL: must include author for secure filtering)
   const naddr = nip19.naddrEncode({

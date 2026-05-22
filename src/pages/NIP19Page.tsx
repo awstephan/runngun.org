@@ -23,6 +23,7 @@ import { CommentForm } from '@/components/CommentForm';
 import { CommentSection } from '@/components/CommentSection';
 import { useEventRSVPs } from '@/hooks/useEventRSVPs';
 import { getAllAdmins } from '@/lib/admins';
+import { safeUrl, safeImgUrl } from '@/lib/safeUrl';
 import type { NostrEvent } from '@nostrify/nostrify';
 import NotFound from './NotFound';
 
@@ -58,6 +59,7 @@ function EventDetailView({ event }: { event: NostrEvent }) {
   const title = getTag(event, 'title') ?? getTag(event, 'name') ?? 'Untitled Event';
   const summary = getTag(event, 'summary') ?? '';
   const image = getTag(event, 'image');
+  const safeImage = image ? safeImgUrl(image) : null;
   const location = getTag(event, 'location');
   const price = getTag(event, 'price');
   const startRaw = getTag(event, 'start');
@@ -76,18 +78,18 @@ function EventDetailView({ event }: { event: NostrEvent }) {
   useSeoMeta({
     title: `${title} — runngun.org`,
     description: summary || content || `Run & Gun event: ${title}`,
-    ogImage: image,
+    ogImage: safeImage ?? undefined,
   });
 
   return (
     <div className="min-h-screen bg-background">
       {/* Hero banner */}
       <div className="relative isolate">
-        {image ? (
+        {safeImage ? (
           <div className="container mx-auto px-4 max-w-2xl">
             <div className="relative h-56 sm:h-72 overflow-hidden rounded-lg mt-4">
               <img
-                src={image}
+                src={safeImage}
                 alt={title}
                 className="w-full h-full object-cover opacity-50"
               />
@@ -213,18 +215,22 @@ function EventDetailView({ event }: { event: NostrEvent }) {
                 Links
               </h2>
               <div className="flex flex-col gap-2">
-                {links.map((link) => (
-                  <a
-                    key={link}
-                    href={link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary/80 transition-colors"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">{link}</span>
-                  </a>
-                ))}
+                {links.map((link) => {
+                  const safeLink = safeUrl(link);
+                  if (!safeLink) return null;
+                  return (
+                    <a
+                      key={link}
+                      href={safeLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary/80 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{safeLink}</span>
+                    </a>
+                  );
+                })}
               </div>
             </div>
           </>
