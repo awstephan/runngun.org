@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { Link } from 'react-router-dom';
-import { nip19 } from 'nostr-tools';
 import L from 'leaflet';
 
-import { useCalendarEvents, splitEvents, type CalendarEvent } from '@/hooks/useCalendarEvents';
+import { useScheduleEvents } from '@/hooks/useScheduleEvents';
+import { getScheduleEventState, scheduleEventNaddr, type ScheduleEvent } from '@/lib/schedule-event';
 import { useGeolocationList } from '@/hooks/useGeolocationList';
 import { Button } from '@/components/ui/button';
 
@@ -108,12 +108,8 @@ function createMarkerIcon(isPast: boolean): L.DivIcon {
   });
 }
 
-function buildPopupContent(calEvent: CalendarEvent): string {
-  const naddr = nip19.naddrEncode({
-    kind: 31923,
-    pubkey: calEvent.event.pubkey,
-    identifier: calEvent.d,
-  });
+function buildPopupContent(calEvent: ScheduleEvent): string {
+  const naddr = scheduleEventNaddr(calEvent);
 
   const dateStr = new Date(calEvent.start * 1000).toLocaleDateString('en-US', {
     month: 'short',
@@ -139,7 +135,7 @@ function buildPopupContent(calEvent: CalendarEvent): string {
 }
 
 interface MapViewProps {
-  events: CalendarEvent[];
+  events: ScheduleEvent[];
   locations: Record<string, GeocodedLocation>;
 }
 
@@ -191,7 +187,6 @@ function MapView({ events, locations }: MapViewProps) {
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
-    const now = Math.floor(Date.now() / 1000);
     const validLocations: [number, number][] = [];
 
     // Count how many events land on each coordinate so we can spread duplicates
@@ -231,8 +226,7 @@ function MapView({ events, locations }: MapViewProps) {
 
       validLocations.push([lat, lng]);
 
-      const effectiveEnd = ev.end ?? ev.start;
-      const isPast = effectiveEnd < now;
+      const isPast = getScheduleEventState(ev) === 'past';
 
       const marker = L.marker([lat, lng], {
         icon: createMarkerIcon(isPast),
@@ -258,14 +252,13 @@ export default function MapPage() {
     description: 'View all Run & Gun events on an interactive map.',
   });
 
-  const { data: events, isLoading: eventsLoading } = useCalendarEvents();
+  const { data: events, isLoading: eventsLoading } = useScheduleEvents();
   const { data: nostrLocations, isLoading: nostrLoading } = useGeolocationList();
   const [locations, setLocations] = useState<Record<string, GeocodedLocation>>({});
   const [isGeocoding, setIsGeocoding] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  const { upcoming, past } = events ? splitEvents(events) : { upcoming: [], past: [] };
-  const allEvents = [...upcoming, ...past];
+  const allEvents = events ?? [];
   const eventsWithLocation = allEvents.filter((ev) => ev.location);
 
   useEffect(() => {

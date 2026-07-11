@@ -1,13 +1,11 @@
 import { Link } from 'react-router-dom';
-import { nip19 } from 'nostr-tools';
 import { MapPin, Clock, ExternalLink, Calendar } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import type { CalendarEvent } from '@/hooks/useCalendarEvents';
+import { getScheduleEventState, scheduleEventNaddr, type ScheduleEvent } from '@/lib/schedule-event';
 import { safeImgUrl } from '@/lib/safeUrl';
 
 interface EventCardProps {
-  calEvent: CalendarEvent;
-  isPast?: boolean;
+  calEvent: ScheduleEvent;
 }
 
 function formatEventDate(start: number, end?: number, tzid?: string): string {
@@ -68,16 +66,14 @@ function getDayNum(start: number): string {
   return new Date(start * 1000).toLocaleDateString('en-US', { day: 'numeric' });
 }
 
-export function EventCard({ calEvent, isPast = false }: EventCardProps) {
-  const { event, title, summary, start, end, startTzid, location, image: rawImage, price } = calEvent;
+export function EventCard({ calEvent }: EventCardProps) {
+  const { title, summary, start, end, startTzid, location, image: rawImage, price } = calEvent;
+  const state = getScheduleEventState(calEvent);
+  const isPast = state === 'past';
   const image = rawImage ? safeImgUrl(rawImage) : null;
 
   // Build naddr for the detail link (CRITICAL: must include author for secure filtering)
-  const naddr = nip19.naddrEncode({
-    kind: 31923,
-    pubkey: event.pubkey,
-    identifier: calEvent.d,
-  });
+  const naddr = scheduleEventNaddr(calEvent);
 
   const dateStr = formatEventDate(start, end, startTzid);
   const timeStr = formatEventTime(start, end, startTzid);
@@ -132,6 +128,11 @@ export function EventCard({ calEvent, isPast = false }: EventCardProps) {
             {isPast && (
               <Badge variant="outline" className="shrink-0 text-xs text-muted-foreground border-muted">
                 Past
+              </Badge>
+            )}
+            {state === 'in-progress' && (
+              <Badge className="font-condensed text-xs uppercase tracking-wider bg-primary/15 text-primary border border-primary/30">
+                In Progress
               </Badge>
             )}
           </div>

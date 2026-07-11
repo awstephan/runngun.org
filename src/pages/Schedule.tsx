@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { Target, Shield, Github } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useCalendarEvents, splitEvents } from '@/hooks/useCalendarEvents';
+import { useScheduleEvents } from '@/hooks/useScheduleEvents';
+import { partitionScheduleEvents } from '@/lib/schedule-event';
 import { EventCard, EventCardSkeleton } from '@/components/EventCard';
 
 const PAGE_SIZE = 10;
@@ -13,17 +14,21 @@ const Schedule = () => {
     description: 'View the complete two-gun biathlon event schedule.',
   });
 
-  const { data: events, isLoading, isError } = useCalendarEvents();
+  const { data: events, isLoading, isError } = useScheduleEvents();
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  const { upcoming } = events ? splitEvents(events) : { upcoming: [] };
+  const activeEvents = useMemo(() => {
+    const partition = events ? partitionScheduleEvents(events) : { upcoming: [], 'in-progress': [] };
+    return [...partition['in-progress'], ...partition.upcoming];
+  }, [events]);
 
-  const visibleEvents = useMemo(() => {
-    return upcoming.slice(0, visibleCount);
-  }, [upcoming, visibleCount]);
+  const visibleEvents = useMemo(
+    () => activeEvents.slice(0, visibleCount),
+    [activeEvents, visibleCount],
+  );
 
-  const hasMore = visibleCount < upcoming.length;
+  const hasMore = visibleCount < activeEvents.length;
 
   const handleLoadMore = useCallback(() => {
     if (hasMore) {
@@ -96,7 +101,7 @@ const Schedule = () => {
             <EmptyState message="Could not load events. Check your relay connections." />
           )}
 
-          {!isLoading && !isError && upcoming.length === 0 && (
+          {!isLoading && !isError && activeEvents.length === 0 && (
             <EmptyState message="No upcoming events scheduled. Check back soon!" />
           )}
 

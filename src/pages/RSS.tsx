@@ -1,67 +1,36 @@
 import { useEffect, useState } from 'react';
-import { nip19 } from 'nostr-tools';
 
-import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
+import { useScheduleEvents } from '@/hooks/useScheduleEvents';
+import { getScheduleEventState, scheduleEventNaddr } from '@/lib/schedule-event';
 
 function safeCDATA(s: string): string {
   return s.replace(/]]>/g, ']]]]><![CDATA[>');
 }
 
 const RSS = () => {
-  const trustedAdmin = useTrustedAdmin();
-  const authority = trustedAdmin.authority;
-  const queryTrusted = trustedAdmin.queryTrusted;
+  const { data: events, isLoading, isError } = useScheduleEvents({ limit: 50 });
   const [feed, setFeed] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!authority) return;
+    if (!events) return;
 
     const generateRSS = async () => {
       try {
         const now = Math.floor(Date.now() / 1000);
-        const events = await queryTrusted([
-          {
-            kinds: [31923],
-            '#t': ['runngun', 'running', 'shooting', 'biathlon'],
-            since: now - 365 * 24 * 3600,
-            limit: 50,
-          },
-        ]);
-
         const upcoming = events
-          .filter((ev) => {
-            const start = parseInt(ev.tags.find(([k]) => k === 'start')?.[1] || '0');
-            return start > now;
-          })
-          .sort((a, b) => {
-            const startA = parseInt(a.tags.find(([k]) => k === 'start')?.[1] || '0');
-            const startB = parseInt(b.tags.find(([k]) => k === 'start')?.[1] || '0');
-            return startA - startB;
-          });
+          .filter((event) => getScheduleEventState(event, now) !== 'past');
 
         const siteUrl = 'https://runngun.org';
         const buildDate = new Date().toUTCString();
 
         const items = upcoming.map((ev) => {
-          const d = ev.tags.find(([k]) => k === 'd')?.[1] || '';
-          const title = ev.tags.find(([k]) => k === 'title')?.[1] || 'Untitled Event';
-          const summary = ev.tags.find(([k]) => k === 'summary')?.[1] || '';
-          const content = ev.content || '';
-          const location = ev.tags.find(([k]) => k === 'location')?.[1] || '';
-          const price = ev.tags.find(([k]) => k === 'price')?.[1] || '';
-          const start = parseInt(ev.tags.find(([k]) => k === 'start')?.[1] || '0');
-          const end = ev.tags.find(([k]) => k === 'end')?.[1];
-
-          const naddr = nip19.naddrEncode({
-            kind: 31923,
-            pubkey: ev.pubkey,
-            identifier: d,
-          });
+          const { title, summary, content, location, price, start, end } = ev;
+          const naddr = scheduleEventNaddr(ev);
           const link = `${siteUrl}/${naddr}`;
           const pubDate = new Date(start * 1000).toUTCString();
           const startDate = new Date(start * 1000).toISOString();
-          const endDate = end ? new Date(parseInt(end) * 1000).toISOString() : '';
+          const endDate = end ? new Date(end * 1000).toISOString() : '';
 
           let description = '';
           if (summary) description += `${summary}\n`;
@@ -116,7 +85,15 @@ const RSS = () => {
     };
 
     generateRSS();
-  }, [authority, queryTrusted]);
+  }, [events]);
+
+  if (isError) {
+    return (
+      <div className="min-h-screen bg-background font-sans flex items-center justify-center">
+        <p className="text-destructive">Failed to generate RSS feed</p>
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -129,7 +106,7 @@ const RSS = () => {
     );
   }
 
-  if (!feed) {
+  if (isLoading || !feed) {
     return (
       <div className="min-h-screen bg-background font-sans flex items-center justify-center">
         <div className="text-center">

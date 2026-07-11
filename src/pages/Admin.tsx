@@ -44,7 +44,14 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 
-import { useCalendarEvents, splitEvents, type CalendarEvent } from '@/hooks/useCalendarEvents';
+import { useScheduleEvents } from '@/hooks/useScheduleEvents';
+import {
+  getScheduleEventState,
+  partitionScheduleEvents,
+  scheduleEventCoordinate,
+  scheduleEventNaddr,
+  type ScheduleEvent,
+} from '@/lib/schedule-event';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useToast } from '@/hooks/useToast';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -84,27 +91,21 @@ function EventRow({
   onDeleted,
   currentUserPubkey,
 }: {
-  calEvent: CalendarEvent;
-  onEdit: (ev: CalendarEvent) => void;
+  calEvent: ScheduleEvent;
+  onEdit: (ev: ScheduleEvent) => void;
   onDeleted: () => void;
   currentUserPubkey?: string;
 }) {
   const { mutate: publishEvent, isPending: isDeleting } = useNostrPublish();
   const { toast } = useToast();
-  const now = Math.floor(Date.now() / 1000);
-  const effectiveEnd = calEvent.end ?? calEvent.start;
-  const isPast = effectiveEnd < now;
+  const isPast = getScheduleEventState(calEvent) === 'past';
   const { data: author } = useAuthor(calEvent.event.pubkey);
   const metadata = author?.metadata;
   const authorName = metadata?.name ?? metadata?.display_name ?? genUserName(calEvent.event.pubkey);
   const authorPicture = metadata?.picture;
   const isOwner = currentUserPubkey?.toLowerCase() === calEvent.event.pubkey.toLowerCase();
 
-  const naddr = nip19.naddrEncode({
-    kind: 31923,
-    pubkey: calEvent.event.pubkey,
-    identifier: calEvent.d,
-  });
+  const naddr = scheduleEventNaddr(calEvent);
 
   function handleDelete() {
     // Publish NIP-09 deletion request
@@ -114,7 +115,7 @@ function EventRow({
         content: 'Deleting calendar event',
         tags: [
           ['e', calEvent.event.id],
-          ['a', `31923:${calEvent.event.pubkey}:${calEvent.d}`],
+          ['a', scheduleEventCoordinate(calEvent)],
         ],
       },
       {
@@ -259,19 +260,21 @@ function EventRow({
 
 function EventsTab() {
   const queryClient = useQueryClient();
-  const { data: events, isLoading } = useCalendarEvents();
+  const { data: events, isLoading } = useScheduleEvents();
   const { user } = useCurrentUser();
   const [showForm, setShowForm] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<CalendarEvent | undefined>(undefined);
+  const [editingEvent, setEditingEvent] = useState<ScheduleEvent | undefined>(undefined);
   const [showPast, setShowPast] = useState(false);
   const [templateToLoad, setTemplateToLoad] = useState<FormState | undefined>(undefined);
 
   const { data: templates = [], isLoading: templatesLoading } = useTemplateList();
   const { saveTemplate, deleteTemplate } = useTemplateMutations();
 
-  const { upcoming, past } = events ? splitEvents(events) : { upcoming: [], past: [] };
+  const partition = events ? partitionScheduleEvents(events) : { upcoming: [], 'in-progress': [], past: [] };
+  const upcoming = [...partition['in-progress'], ...partition.upcoming];
+  const past = partition.past;
 
-  function handleEdit(ev: CalendarEvent) {
+  function handleEdit(ev: ScheduleEvent) {
     setEditingEvent(ev);
     setTemplateToLoad(undefined);
     setShowForm(true);

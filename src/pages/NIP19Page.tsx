@@ -22,17 +22,16 @@ import { CommentForm } from '@/components/CommentForm';
 import { CommentSection } from '@/components/CommentSection';
 import { useEventRSVPs } from '@/hooks/useEventRSVPs';
 import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
+import {
+  SCHEDULE_EVENT_KIND,
+  SCHEDULE_EVENT_TOPIC,
+  getScheduleEventState,
+  parseScheduleEvent,
+  scheduleEventNaddr,
+  type ScheduleEvent,
+} from '@/lib/schedule-event';
 import { safeUrl, safeImgUrl } from '@/lib/safeUrl';
-import type { NostrEvent } from '@nostrify/nostrify';
 import NotFound from './NotFound';
-
-function getTag(event: NostrEvent, name: string): string | undefined {
-  return event.tags.find(([t]) => t === name)?.[1];
-}
-
-function getAllTags(event: NostrEvent, name: string): string[] {
-  return event.tags.filter(([t]) => t === name).map(([, v]) => v).filter(Boolean);
-}
 
 function formatFullDate(ts: number, tzid?: string): string {
   return new Date(ts * 1000).toLocaleDateString('en-US', {
@@ -54,25 +53,10 @@ function formatTime(ts: number, tzid?: string): string {
   });
 }
 
-function EventDetailView({ event }: { event: NostrEvent }) {
-  const title = getTag(event, 'title') ?? getTag(event, 'name') ?? 'Untitled Event';
-  const summary = getTag(event, 'summary') ?? '';
-  const image = getTag(event, 'image');
+function EventDetailView({ scheduleEvent }: { scheduleEvent: ScheduleEvent }) {
+  const { event, title, summary, image, location, price, start, end, startTzid: tzid, links, tags, content } = scheduleEvent;
   const safeImage = image ? safeImgUrl(image) : null;
-  const location = getTag(event, 'location');
-  const price = getTag(event, 'price');
-  const startRaw = getTag(event, 'start');
-  const endRaw = getTag(event, 'end');
-  const tzid = getTag(event, 'start_tzid');
-  const links = getAllTags(event, 'r');
-  const tags = getAllTags(event, 't');
-  const content = event.content;
-
-  const start = startRaw ? parseInt(startRaw) : null;
-  const end = endRaw ? parseInt(endRaw) : null;
-  const now = Math.floor(Date.now() / 1000);
-  const effectiveEnd = end ?? start;
-  const isPast = effectiveEnd !== null && effectiveEnd < now;
+  const state = getScheduleEventState(scheduleEvent);
 
   useSeoMeta({
     title: `${title} — runngun.org`,
@@ -125,9 +109,14 @@ function EventDetailView({ event }: { event: NostrEvent }) {
 
         {/* Title */}
         <div className="mt-2">
-          {isPast && (
+          {state === 'past' && (
             <Badge variant="outline" className="mb-3 text-xs text-muted-foreground border-muted">
               Past Event
+            </Badge>
+          )}
+          {state === 'in-progress' && (
+            <Badge className="mb-3 text-xs uppercase tracking-wide bg-primary/15 text-primary border border-primary/30">
+              In Progress
             </Badge>
           )}
           <h1 className="font-condensed text-4xl sm:text-5xl font-bold uppercase tracking-wide text-foreground leading-tight">
@@ -155,15 +144,12 @@ function EventDetailView({ event }: { event: NostrEvent }) {
 
         {/* Details grid */}
         <div className="grid gap-4 sm:grid-cols-2">
-          {start && (
-            <DetailRow
+          <DetailRow
               icon={<Calendar className="w-4 h-4 text-primary shrink-0" />}
               label="Date"
               value={formatFullDate(start, tzid)}
-            />
-          )}
-          {start && (
-            <DetailRow
+          />
+          <DetailRow
               icon={<Clock className="w-4 h-4 text-primary shrink-0" />}
               label="Time"
               value={
@@ -171,8 +157,7 @@ function EventDetailView({ event }: { event: NostrEvent }) {
                   ? `${formatTime(start, tzid)} – ${formatTime(end, tzid)}`
                   : formatTime(start, tzid)
               }
-            />
-          )}
+          />
           {location && (
             <DetailRow
               icon={<MapPin className="w-4 h-4 text-primary shrink-0" />}
@@ -242,9 +227,9 @@ function EventDetailView({ event }: { event: NostrEvent }) {
           <h2 className="font-condensed text-lg font-bold uppercase tracking-wide text-foreground mb-4">
             Who's Going
           </h2>
-          <RSVPButton eventNaddr={buildNaddr(event)} />
+          <RSVPButton eventNaddr={scheduleEventNaddr(scheduleEvent)} />
           <div className="mt-4">
-            <RSVPListWithData eventNaddr={buildNaddr(event)} />
+            <RSVPListWithData eventNaddr={scheduleEventNaddr(scheduleEvent)} />
           </div>
         </div>
 
@@ -299,22 +284,13 @@ function DetailRow({
   );
 }
 
-function buildNaddr(event: NostrEvent): string {
-  const d = event.tags.find(([t]) => t === 'd')?.[1] ?? '';
-  return nip19.naddrEncode({
-    kind: 31923,
-    pubkey: event.pubkey,
-    identifier: d,
-  });
-}
-
 function RSVPListWithData({ eventNaddr }: { eventNaddr: string }) {
   const { data, isLoading } = useEventRSVPs(eventNaddr);
   if (isLoading) return <div className="text-muted-foreground text-sm">Loading...</div>;
   return <RSVPList going={data?.going ?? []} tentative={data?.tentative ?? []} />;
 }
 
-function CalendarEventLoader({ kind, pubkey, identifier }: { kind: number; pubkey: string; identifier: string }) {
+function ScheduleEventLoader({ kind, pubkey, identifier }: { kind: number; pubkey: string; identifier: string }) {
   const { nostr } = useNostr();
   const trustedAdmin = useTrustedAdmin();
   const authority = trustedAdmin.authority;
@@ -336,13 +312,14 @@ function CalendarEventLoader({ kind, pubkey, identifier }: { kind: number; pubke
             kinds: [kind],
             authors: [pubkey],
             '#d': [identifier],
+            '#t': [SCHEDULE_EVENT_TOPIC],
             limit: 1,
           },
         ],
         { signal },
       );
 
-      return events[0] ?? null;
+      return events[0] ? parseScheduleEvent(events[0]) : null;
     },
     enabled: Boolean(authority),
   });
@@ -378,7 +355,7 @@ function CalendarEventLoader({ kind, pubkey, identifier }: { kind: number; pubke
     );
   }
 
-  return <EventDetailView event={event} />;
+  return <EventDetailView scheduleEvent={event} />;
 }
 
 export function NIP19Page() {
@@ -400,9 +377,9 @@ export function NIP19Page() {
   switch (type) {
     case 'naddr': {
       const { kind, pubkey, identifier: dTag } = decoded.data;
-      if (kind !== 31923) return <NotFound />;
+      if (kind !== SCHEDULE_EVENT_KIND) return <NotFound />;
       return (
-        <CalendarEventLoader kind={kind} pubkey={pubkey} identifier={dTag} />
+        <ScheduleEventLoader kind={kind} pubkey={pubkey} identifier={dTag} />
       );
     }
 

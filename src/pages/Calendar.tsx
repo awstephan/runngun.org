@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import type { CalendarEvent } from '@/hooks/useCalendarEvents';
+import type { ScheduleEvent } from '@/lib/schedule-event';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -26,13 +26,21 @@ function getInitialMonth() {
   return { year: now.getFullYear(), month: now.getMonth() };
 }
 
-function groupEventsByDay(events: CalendarEvent[]): Map<number, CalendarEvent[]> {
-  const map = new Map<number, CalendarEvent[]>();
+function groupEventsByDay(
+  events: ScheduleEvent[],
+  year: number,
+  month: number,
+): Map<number, ScheduleEvent[]> {
+  const map = new Map<number, ScheduleEvent[]>();
   for (const ev of events) {
-    const day = new Date(ev.start * 1000).getDate();
-    const existing = map.get(day) ?? [];
-    existing.push(ev);
-    map.set(day, existing);
+    for (const dayIndex of ev.days) {
+      const date = new Date(Number(dayIndex) * 86_400_000);
+      if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month) continue;
+      const day = date.getUTCDate();
+      const existing = map.get(day) ?? [];
+      existing.push(ev);
+      map.set(day, existing);
+    }
   }
   return map;
 }
@@ -52,7 +60,10 @@ const Calendar = () => {
     viewDate.month
   );
 
-  const eventsByDay = useMemo(() => groupEventsByDay(events), [events]);
+  const eventsByDay = useMemo(
+    () => groupEventsByDay(events, viewDate.year, viewDate.month),
+    [events, viewDate.month, viewDate.year],
+  );
 
   const today = useMemo(() => {
     const now = new Date();
@@ -268,7 +279,6 @@ const Calendar = () => {
                 <EventCard
                   key={ev.event.id}
                   calEvent={ev}
-                  isPast={ev.end ? ev.end < Math.floor(Date.now() / 1000) : false}
                 />
               ))
             )}

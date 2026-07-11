@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { Target, Shield, Zap, ChevronDown, ChevronUp, Globe, Key, Server, Github } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useCalendarEvents, splitEvents } from '@/hooks/useCalendarEvents';
+import { useScheduleEvents } from '@/hooks/useScheduleEvents';
+import { partitionScheduleEvents } from '@/lib/schedule-event';
 import { EventCard, EventCardSkeleton } from '@/components/EventCard';
 import { Button } from '@/components/ui/button';
 
@@ -15,8 +16,9 @@ const Index = () => {
       'The official schedule for Run & Gun two-gun biathlon competition events. Race hard, shoot straight.',
   });
 
-  const { data: events, isLoading, isError } = useCalendarEvents();
-  const { upcoming } = events ? splitEvents(events) : { upcoming: [] };
+  const { data: events, isLoading, isError } = useScheduleEvents();
+  const partition = events ? partitionScheduleEvents(events) : { upcoming: [], 'in-progress': [], past: [] };
+  const upcoming = [...partition['in-progress'], ...partition.upcoming];
 
   return (
     <div className="min-h-screen bg-background font-sans">

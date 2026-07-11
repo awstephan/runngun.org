@@ -16,7 +16,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Loader2, Plus, X, Save, Upload, Calendar } from 'lucide-react';
-import type { CalendarEvent } from '@/hooks/useCalendarEvents';
+import {
+  SCHEDULE_EVENT_KIND,
+  SCHEDULE_EVENT_TOPIC,
+  scheduleEventDays,
+  type ScheduleEvent,
+} from '@/lib/schedule-event';
 
 const US_TIMEZONES = [
   { value: 'America/Chicago', label: 'Central (Chicago)' },
@@ -44,7 +49,7 @@ export interface FormState {
 }
 
 interface EventFormProps {
-  existing?: CalendarEvent;
+  existing?: ScheduleEvent;
   templateToLoad?: Partial<FormState>;
   onSuccess?: () => void;
   onCancel?: () => void;
@@ -70,17 +75,6 @@ function toTimeStr(ts: number): string {
 function toTimestamp(dateStr: string, timeStr: string): number {
   const dt = new Date(`${dateStr}T${timeStr || '00:00'}`);
   return Math.floor(dt.getTime() / 1000);
-}
-
-function calcDTags(start: number, end?: number): string[] {
-  const daySeconds = 86400;
-  const startDay = Math.floor(start / daySeconds);
-  const endDay = end ? Math.floor(end / daySeconds) : startDay;
-  const days = new Set<number>();
-  for (let d = startDay; d <= endDay; d++) {
-    days.add(d);
-  }
-  return Array.from(days).map(String);
 }
 
 export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveTemplateData }: EventFormProps) {
@@ -117,7 +111,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
       content: existing.content,
       location: existing.location ?? '',
       image: existing.image ?? '',
-      price: existing.event.tags.find(([t]) => t === 'price')?.[1] ?? '',
+      price: existing.price ?? '',
       startDate: toDateStr(existing.start),
       startTime: toTimeStr(existing.start),
       endDate: existing.end ? toDateStr(existing.end) : toDateStr(existing.start),
@@ -263,13 +257,13 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
 
     const dTag = existing?.d ?? crypto.randomUUID();
     const validLinks = form.links.filter((l) => l.trim().length > 0);
-    const dTags = calcDTags(start, end);
+    const dTags = scheduleEventDays(start, end);
 
     const tags: string[][] = [
       ['d', dTag],
       ['title', form.title.trim()],
       ['start', String(start)],
-      ['t', 'runngun'],
+      ['t', SCHEDULE_EVENT_TOPIC],
       ['t', 'running'],
       ['t', 'shooting'],
       ['t', 'biathlon'],
@@ -289,7 +283,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
 
     publishEvent(
       {
-        kind: 31923,
+        kind: SCHEDULE_EVENT_KIND,
         content: form.content.trim(),
         tags,
       },

@@ -1,8 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { validateCalendarEvent, parseCalendarEvent } from './useCalendarEvents';
-import type { CalendarEvent } from './useCalendarEvents';
-import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
+import { useScheduleEvents } from '@/hooks/useScheduleEvents';
+import { scheduleEventDays, type ScheduleEvent } from '@/lib/schedule-event';
 
 function getMonthRange(year: number, month: number) {
   const start = new Date(year, month, 1, 0, 0, 0, 0);
@@ -32,7 +30,7 @@ function getNextMonth(year: number, month: number) {
 }
 
 interface UseMonthEventsResult {
-  events: CalendarEvent[];
+  events: ScheduleEvent[];
   year: number;
   month: number;
   daysInMonth: number;
@@ -42,42 +40,9 @@ interface UseMonthEventsResult {
 }
 
 export function useMonthEvents(year: number, month: number): UseMonthEventsResult {
-  const trustedAdmin = useTrustedAdmin();
-  const authority = trustedAdmin.authority;
-
   const { since, until } = useMemo(() => getMonthRange(year, month), [year, month]);
-
-  const query = useQuery({
-    queryKey: ['month-events', year, month, authority?.revision],
-    queryFn: async ({ signal }) => {
-      const startOfRange = new Date(year - 1, 0, 1).getTime() / 1000;
-      const endOfRange = new Date(year + 2, 0, 0, 23, 59, 59).getTime() / 1000;
-
-      const events = await trustedAdmin.queryTrusted(
-        [
-          {
-            kinds: [31923],
-            '#t': ['runngun'],
-            since: startOfRange,
-            until: endOfRange,
-            limit: 500,
-          },
-        ],
-        { signal },
-      );
-
-      return events
-        .filter(validateCalendarEvent)
-        .map(parseCalendarEvent)
-        .filter((ev) => {
-          const evStart = ev.start;
-          return evStart >= since && evStart < until;
-        })
-        .sort((a, b) => a.start - b.start);
-    },
-    enabled: Boolean(authority),
-    staleTime: 30_000,
-  });
+  const days = useMemo(() => scheduleEventDays(since, until), [since, until]);
+  const query = useScheduleEvents({ days, limit: 500 });
 
   return {
     events: query.data ?? [],
