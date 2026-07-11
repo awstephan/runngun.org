@@ -3,7 +3,7 @@ import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useToast } from '@/hooks/useToast';
-import { useGeolocationMutations } from '@/hooks/useGeolocationMutations';
+import { useLocationCuration } from '@/hooks/useLocationCuration';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -82,7 +82,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
   const { mutateAsync: uploadFile, isPending: isUploading } = useUploadFile();
   const { user } = useCurrentUser();
   const { toast } = useToast();
-  const { geocodeAndSaveLocation } = useGeolocationMutations();
+  const { curateLocation } = useLocationCuration();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -294,7 +294,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
             description: `"${form.title}" has been ${existing ? 'updated' : 'published'} to Nostr.`,
           });
           if (form.location.trim()) {
-            geocodeAndSaveLocation(form.location.trim());
+            curateLocation(form.location.trim());
           }
           onSuccess?.();
         },

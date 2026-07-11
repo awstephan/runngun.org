@@ -1,102 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { Link } from 'react-router-dom';
 import L from 'leaflet';
 
 import { useScheduleEvents } from '@/hooks/useScheduleEvents';
 import { getScheduleEventState, scheduleEventNaddr, type ScheduleEvent } from '@/lib/schedule-event';
-import { useGeolocationList } from '@/hooks/useGeolocationList';
+import { useLocationResolutions } from '@/hooks/useLocationResolutions';
+import { normalizeLocation, type LocationResolution } from '@/lib/location-resolution';
 import { Button } from '@/components/ui/button';
-
-interface GeocodedLocation {
-  lat: number;
-  lng: number;
-}
-
-const GEOCODE_CACHE_KEY = 'runngun:location-cache';
-
-function getGeocodeCache(): Record<string, GeocodedLocation> {
-  try {
-    const cached = localStorage.getItem(GEOCODE_CACHE_KEY);
-    return cached ? JSON.parse(cached) : {};
-  } catch {
-    return {};
-  }
-}
-
-function setGeocodeCache(cache: Record<string, GeocodedLocation>) {
-  try {
-    localStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(cache));
-  } catch {
-    // Ignore
-  }
-}
-
-function extractAddressParts(location: string): string[] {
-  const parts = location.split(',').map((p) => p.trim()).filter((p) => p.length > 0);
-  if (parts.length <= 1) return [location];
-
-  const candidates: string[] = [location];
-  for (let i = parts.length - 1; i >= 1; i--) {
-    candidates.push(parts.slice(i).join(', '));
-  }
-  return candidates;
-}
-
-async function geocodeLocation(location: string, nostrLocations: Record<string, GeocodedLocation>): Promise<GeocodedLocation | null> {
-  const cache = getGeocodeCache();
-  const cacheKey = location.toLowerCase().trim();
-
-  if (nostrLocations[cacheKey]) {
-    cache[cacheKey] = nostrLocations[cacheKey];
-    setGeocodeCache(cache);
-    return nostrLocations[cacheKey];
-  }
-
-  if (cache[cacheKey]) {
-    return cache[cacheKey];
-  }
-
-  const addressCandidates = extractAddressParts(location);
-  for (const candidate of addressCandidates) {
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 1100));
-
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(candidate)}&limit=1`,
-        {
-          headers: {
-            'User-Agent': 'runngun.org/1.0 (admin@runngun.org)',
-            'Accept': 'application/json',
-          },
-        }
-      );
-
-      if (response.status === 429) {
-        await new Promise((r) => setTimeout(r, 5000));
-        continue;
-      }
-      if (!response.ok) continue;
-
-      const data = await response.json();
-      if (!data || data.length === 0) continue;
-
-      const result: GeocodedLocation = {
-        lat: parseFloat(data[0].lat),
-        lng: parseFloat(data[0].lon),
-      };
-
-      cache[cacheKey] = result;
-      setGeocodeCache(cache);
-
-      return result;
-    } catch {
-      continue;
-    }
-  }
-
-  return null;
-}
 
 function createMarkerIcon(isPast: boolean): L.DivIcon {
   const color = isPast ? '#6b7280' : '#dc5522';
@@ -108,7 +19,7 @@ function createMarkerIcon(isPast: boolean): L.DivIcon {
   });
 }
 
-function buildPopupContent(calEvent: ScheduleEvent): string {
+function buildPopupContent(calEvent: ScheduleEvent, resolution: LocationResolution): string {
   const naddr = scheduleEventNaddr(calEvent);
 
   const dateStr = new Date(calEvent.start * 1000).toLocaleDateString('en-US', {
@@ -127,6 +38,7 @@ function buildPopupContent(calEvent: ScheduleEvent): string {
       </a>
       <div style="font-size: 12px; color: #999; margin-top: 4px;">${dateStr}</div>
       ${calEvent.location ? `<div style="font-size: 12px; color: #999; margin-top: 4px;">${escapeHtml(calEvent.location)}</div>` : ''}
+      ${resolution.precision === 'approximate' ? '<div style="font-size: 11px; color: #dc5522; margin-top: 4px;">Approximate location</div>' : ''}
       <a href="/${naddr}" style="font-size: 12px; color: #dc5522; text-decoration: none; margin-top: 8px; display: block;">
         View Details →
       </a>
@@ -136,7 +48,7 @@ function buildPopupContent(calEvent: ScheduleEvent): string {
 
 interface MapViewProps {
   events: ScheduleEvent[];
-  locations: Record<string, GeocodedLocation>;
+  locations: Record<string, LocationResolution>;
 }
 
 function MapView({ events, locations }: MapViewProps) {
@@ -195,7 +107,7 @@ function MapView({ events, locations }: MapViewProps) {
 
     events.forEach((ev) => {
       if (!ev.location) return;
-      const cacheKey = ev.location.toLowerCase().trim();
+      const cacheKey = normalizeLocation(ev.location);
       const loc = locations[cacheKey];
       if (!loc) return;
       const key = `${loc.lat},${loc.lng}`;
@@ -206,7 +118,7 @@ function MapView({ events, locations }: MapViewProps) {
 
     events.forEach((ev) => {
       if (!ev.location) return;
-      const cacheKey = ev.location.toLowerCase().trim();
+      const cacheKey = normalizeLocation(ev.location);
       const loc = locations[cacheKey];
       if (!loc) return;
 
@@ -232,7 +144,7 @@ function MapView({ events, locations }: MapViewProps) {
         icon: createMarkerIcon(isPast),
       }).addTo(map);
 
-      marker.bindPopup(buildPopupContent(ev));
+      marker.bindPopup(buildPopupContent(ev, loc));
       markersRef.current.push(marker);
     });
 
@@ -253,72 +165,11 @@ export default function MapPage() {
   });
 
   const { data: events, isLoading: eventsLoading } = useScheduleEvents();
-  const { data: nostrLocations, isLoading: nostrLoading } = useGeolocationList();
-  const [locations, setLocations] = useState<Record<string, GeocodedLocation>>({});
-  const [isGeocoding, setIsGeocoding] = useState(false);
-  const [progress, setProgress] = useState(0);
-
   const allEvents = events ?? [];
   const eventsWithLocation = allEvents.filter((ev) => ev.location);
-
-  useEffect(() => {
-    // Wait until both events and Nostr locations are loaded before deciding what to geocode
-    if (eventsLoading || nostrLoading) return;
-    if (!eventsWithLocation.length) return;
-
-    // Build merged lookup: Nostr geolocations take priority, then localStorage cache
-    const localCache = getGeocodeCache();
-    const mergedCache: Record<string, GeocodedLocation> = { ...localCache };
-
-    if (nostrLocations) {
-      Object.entries(nostrLocations).forEach(([key, loc]) => {
-        mergedCache[key] = loc; // Nostr wins
-      });
-    }
-
-    const uniqueLocs = [...new Set(eventsWithLocation.map((ev) => ev.location!.toLowerCase().trim()))];
-    const needGeocoding = uniqueLocs.filter((loc) => !mergedCache[loc]);
-
-    if (needGeocoding.length === 0) {
-      setLocations(mergedCache);
-      return;
-    }
-
-    setIsGeocoding(true);
-    setProgress(0);
-
-    let cancelled = false;
-
-    const geocodeAll = async () => {
-      for (let i = 0; i < needGeocoding.length; i++) {
-        if (cancelled) return;
-        setProgress(((i + 1) / needGeocoding.length) * 100);
-
-        const loc = needGeocoding[i];
-        const originalLocation = eventsWithLocation.find(
-          (ev) => ev.location!.toLowerCase().trim() === loc
-        )?.location;
-
-        if (originalLocation) {
-          const result = await geocodeLocation(originalLocation, nostrLocations || {});
-          if (result) {
-            mergedCache[loc] = result;
-          }
-        }
-      }
-
-      if (!cancelled) {
-        setLocations({ ...mergedCache });
-        setIsGeocoding(false);
-      }
-    };
-
-    geocodeAll();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [eventsLoading, nostrLoading, eventsWithLocation.length]);
+  const { data: locations = {}, isLoading: locationsLoading } = useLocationResolutions(
+    eventsWithLocation.flatMap((event) => event.location ? [event.location] : []),
+  );
 
   return (
     <div className="min-h-screen bg-background font-sans flex flex-col">
@@ -352,24 +203,11 @@ export default function MapPage() {
       <main className="flex-1 relative">
         <MapView events={eventsWithLocation} locations={locations} />
 
-        {eventsLoading && (
+        {(eventsLoading || locationsLoading) && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm z-[1000]">
             <div className="text-center">
               <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-              <p className="text-muted-foreground">Loading events...</p>
-            </div>
-          </div>
-        )}
-
-        {!eventsLoading && isGeocoding && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm z-[1000]">
-            <div className="text-center w-64">
-              <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-              <p className="text-muted-foreground mb-2">Geocoding locations...</p>
-              <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-                <div className="h-full bg-primary transition-all duration-300" style={{ width: `${progress}%` }} />
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">{Math.round(progress)}%</p>
+              <p className="text-muted-foreground">Resolving event locations...</p>
             </div>
           </div>
         )}

@@ -15,3 +15,7 @@ _Avoid_: Default admin, stored admin, legacy admin
 **Schedule Event**:
 A trusted, time-based Run & Gun occurrence explicitly categorized for the Run & Gun schedule. It is upcoming before its start, in progress from its inclusive start until its exclusive end, and past afterward; without an end it is instantaneous.
 _Avoid_: Calendar item, race listing
+
+**Location Resolution**:
+The coordinates assigned to a normalized Schedule Event location, with exact or approximate precision. A Site Owner-published resolution is curated truth; browser persistence and external geocoding provide fallback discovery only.
+_Avoid_: Geocode cache entry, map location
