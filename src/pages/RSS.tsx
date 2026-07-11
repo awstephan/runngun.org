@@ -1,30 +1,28 @@
-import { useEffect, useRef, useState } from 'react';
-import { useNostr } from '@nostrify/react';
+import { useEffect, useState } from 'react';
 import { nip19 } from 'nostr-tools';
 
-import { getAllAdmins } from '@/lib/admins';
+import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 
 function safeCDATA(s: string): string {
   return s.replace(/]]>/g, ']]]]><![CDATA[>');
 }
 
 const RSS = () => {
-  const { nostr } = useNostr();
-  const hasGenerated = useRef(false);
+  const trustedAdmin = useTrustedAdmin();
+  const authority = trustedAdmin.authority;
+  const queryTrusted = trustedAdmin.queryTrusted;
   const [feed, setFeed] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (hasGenerated.current) return;
-    hasGenerated.current = true;
+    if (!authority) return;
 
     const generateRSS = async () => {
       try {
         const now = Math.floor(Date.now() / 1000);
-        const events = await nostr.query([
+        const events = await queryTrusted([
           {
             kinds: [31923],
-            authors: getAllAdmins(),
             '#t': ['runngun', 'running', 'shooting', 'biathlon'],
             since: now - 365 * 24 * 3600,
             limit: 50,
@@ -118,7 +116,7 @@ const RSS = () => {
     };
 
     generateRSS();
-  }, [nostr]);
+  }, [authority, queryTrusted]);
 
   if (error) {
     return (

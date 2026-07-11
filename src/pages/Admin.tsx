@@ -50,11 +50,11 @@ import { useToast } from '@/hooks/useToast';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useAuthors } from '@/hooks/useAuthors';
-import { useAdminList } from '@/hooks/useAdminList';
 import { useAdminMutations } from '@/hooks/useAdminMutations';
+import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 import { useTemplateList, type EventTemplate } from '@/hooks/useTemplateList';
 import { useTemplateMutations } from '@/hooks/useTemplateMutations';
-import { SITE_OWNER_PUBKEY, DEFAULT_ADMIN_PUBKEYS } from '@/lib/config';
+import { SITE_OWNER_PUBKEY } from '@/lib/config';
 import { EventForm, type FormState } from '@/components/EventForm';
 import { genUserName } from '@/lib/genUserName';
 import { LoginArea } from '@/components/auth/LoginArea';
@@ -260,16 +260,14 @@ function EventRow({
 function EventsTab() {
   const queryClient = useQueryClient();
   const { data: events, isLoading } = useCalendarEvents();
-  const { toast } = useToast();
   const { user } = useCurrentUser();
   const [showForm, setShowForm] = useState(false);
   const [editingEvent, setEditingEvent] = useState<CalendarEvent | undefined>(undefined);
   const [showPast, setShowPast] = useState(false);
   const [templateToLoad, setTemplateToLoad] = useState<FormState | undefined>(undefined);
 
-  const { data: adminList = DEFAULT_ADMIN_PUBKEYS } = useAdminList();
-  const { data: templates = [], isLoading: templatesLoading } = useTemplateList(adminList);
-  const { saveTemplate, deleteTemplate, isAdmin } = useTemplateMutations(adminList);
+  const { data: templates = [], isLoading: templatesLoading } = useTemplateList();
+  const { saveTemplate, deleteTemplate } = useTemplateMutations();
 
   const { upcoming, past } = events ? splitEvents(events) : { upcoming: [], past: [] };
 
@@ -489,7 +487,9 @@ function IdentityTab() {
   const [isAdding, setIsAdding] = useState(false);
 
   const { user, users, metadata: currentUserMetadata } = useCurrentUser();
-  const { data: adminList = DEFAULT_ADMIN_PUBKEYS, isLoading: adminLoading } = useAdminList();
+  const trustedAdmin = useTrustedAdmin();
+  const adminList = trustedAdmin.authority?.trustedAdmins ?? [];
+  const adminLoading = !trustedAdmin.authority;
   const { data: adminProfiles } = useAuthors(adminList);
   const { addAdmin, removeAdmin, isSiteOwner } = useAdminMutations();
 
@@ -550,7 +550,7 @@ function IdentityTab() {
           <div className="space-y-2">
             {users.map((u, i) => {
               const npub = nip19.npubEncode(u.pubkey);
-              const profile = i === 0 ? currentUserMetadata : adminProfiles?.[u.pubkey];
+              const profile = i === 0 ? currentUserMetadata : adminProfiles?.[u.pubkey]?.metadata;
               const displayName = profile?.name ?? profile?.display_name ?? genUserName(u.pubkey);
               const picture = profile?.picture;
               const isCurrent = i === 0;
@@ -688,7 +688,7 @@ function IdentityTab() {
                         {npub}
                       </span>
                     </div>
-                    {isOwner && isSiteOwner && (
+                    {!isOwner && isSiteOwner && (
                       <Button
                         variant="ghost"
                         size="icon"

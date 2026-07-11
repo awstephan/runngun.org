@@ -1,8 +1,8 @@
-import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { CalendarEvent, validateCalendarEvent, parseCalendarEvent } from './useCalendarEvents';
-import { getAllAdmins } from '@/lib/admins';
+import { validateCalendarEvent, parseCalendarEvent } from './useCalendarEvents';
+import type { CalendarEvent } from './useCalendarEvents';
+import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 
 function getMonthRange(year: number, month: number) {
   const start = new Date(year, month, 1, 0, 0, 0, 0);
@@ -42,22 +42,21 @@ interface UseMonthEventsResult {
 }
 
 export function useMonthEvents(year: number, month: number): UseMonthEventsResult {
-  const { nostr } = useNostr();
-  const admins = getAllAdmins();
+  const trustedAdmin = useTrustedAdmin();
+  const authority = trustedAdmin.authority;
 
   const { since, until } = useMemo(() => getMonthRange(year, month), [year, month]);
 
   const query = useQuery({
-    queryKey: ['month-events', year, month, admins],
+    queryKey: ['month-events', year, month, authority?.revision],
     queryFn: async ({ signal }) => {
       const startOfRange = new Date(year - 1, 0, 1).getTime() / 1000;
       const endOfRange = new Date(year + 2, 0, 0, 23, 59, 59).getTime() / 1000;
 
-      const events = await nostr.query(
+      const events = await trustedAdmin.queryTrusted(
         [
           {
             kinds: [31923],
-            authors: getAllAdmins(),
             '#t': ['runngun'],
             since: startOfRange,
             until: endOfRange,
@@ -76,6 +75,7 @@ export function useMonthEvents(year: number, month: number): UseMonthEventsResul
         })
         .sort((a, b) => a.start - b.start);
     },
+    enabled: Boolean(authority),
     staleTime: 30_000,
   });
 

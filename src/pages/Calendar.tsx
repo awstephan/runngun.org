@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { Link } from 'react-router-dom';
-import { Target, ChevronLeft, ChevronRight, Shield, Github } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Shield, Github } from 'lucide-react';
 import { useMonthEvents } from '@/hooks/useMonthEvents';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { EventCard } from '@/components/EventCard';

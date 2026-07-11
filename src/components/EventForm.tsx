@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Plus, X, Save, Upload, Image as ImageIcon, Calendar } from 'lucide-react';
+import { Loader2, Plus, X, Save, Upload, Calendar } from 'lucide-react';
 import type { CalendarEvent } from '@/hooks/useCalendarEvents';
 
 const US_TIMEZONES = [
@@ -125,11 +125,10 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
       tzid: existing.startTzid ?? browserTz,
       links: existing.links.length > 0 ? existing.links : [''],
     });
-  }, [existing]);
+  }, [browserTz, existing]);
 
   useEffect(() => {
     if (!templateToLoad) return;
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const now = Math.floor(Date.now() / 1000);
     setForm({
       title: templateToLoad.title ?? '',
@@ -145,7 +144,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
       tzid: templateToLoad.tzid ?? defaultTz,
       links: templateToLoad.links?.length ? templateToLoad.links : [''],
     });
-  }, [templateToLoad]);
+  }, [defaultTz, templateToLoad]);
 
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { Target, Shield, Github } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useCalendarEvents, splitEvents, CalendarEvent } from '@/hooks/useCalendarEvents';
+import { useCalendarEvents, splitEvents } from '@/hooks/useCalendarEvents';
 import { EventCard, EventCardSkeleton } from '@/components/EventCard';
 
 const PAGE_SIZE = 10;

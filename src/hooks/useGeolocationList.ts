@@ -63,7 +63,7 @@ export function useGeolocationList() {
       return locations;
     },
     staleTime: 60 * 60 * 1000,
-    placeholderData: getInitialData,
+    placeholderData: getInitialData(),
   });
 
   return query;

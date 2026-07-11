@@ -1,6 +1,6 @@
-import { useAdminList } from '@/hooks/useAdminList';
+import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 
 export function AdminListLoader() {
-  useAdminList();
+  useTrustedAdmin();
   return null;
 }

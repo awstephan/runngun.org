@@ -1,0 +1,21 @@
+{
+  "name": "runngun.org",
+  "short_name": "Run & Gun",
+  "description": "The official schedule for Run & Gun two-gun biathlon competition events.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#dc5522",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

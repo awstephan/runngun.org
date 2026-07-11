@@ -98,7 +98,7 @@ interface CommentItemProps {
   authorPubkey: string;
 }
 
-function CommentItem({ comment, eventId, authorPubkey }: CommentItemProps) {
+function CommentItem({ comment }: CommentItemProps) {
   const { data: author } = useAuthor(comment.pubkey);
   const name = author?.metadata?.name ?? genUserName(comment.pubkey);
   const picture = author?.metadata?.picture;

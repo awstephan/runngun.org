@@ -1,26 +1,23 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
 
-import { SITE_OWNER_PUBKEY, ADMIN_LIST_DTAG, DEFAULT_ADMIN_PUBKEYS } from '@/lib/config';
+import { SITE_OWNER_PUBKEY, ADMIN_LIST_DTAG } from '@/lib/config';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useToast } from '@/hooks/useToast';
-
-const LEGACY_STORAGE_KEY = 'nostr:admins';
-
-function getLegacyStoredAdmins(): string[] {
-  try {
-    const stored = localStorage.getItem(LEGACY_STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch {
-    return [];
-  }
-}
+import {
+  AUTHORITY_QUERY_KEY,
+  normalizePubkey,
+  parseAuthorityEvent,
+  persistAuthority,
+  useTrustedAdmin,
+} from '@/hooks/useTrustedAdmin';
 
 export function useAdminMutations() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const trustedAdmin = useTrustedAdmin();
 
   const isSiteOwner = user?.pubkey === SITE_OWNER_PUBKEY;
 
@@ -44,31 +41,21 @@ export function useAdminMutations() {
     }
 
     try {
-      const events = await nostr.query([
-        {
-          kinds: [30078],
-          authors: [SITE_OWNER_PUBKEY],
-          '#d': [ADMIN_LIST_DTAG],
-          limit: 1,
-        },
-      ]);
-
-      let currentPubkeys: string[] = [];
-      if (events.length > 0) {
-        const content = events[0].content;
-        const parsed = JSON.parse(content);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          currentPubkeys = parsed.filter(
-            (pk): pk is string => typeof pk === 'string' && /^[0-9a-fA-F]{64}$/.test(pk)
-          );
-        }
+      const refreshed = await trustedAdmin.refetch();
+      const authority = refreshed.data;
+      if (!authority || authority.freshness !== 'fresh') {
+        toast({
+          title: 'Admin list is stale',
+          description: 'Reconnect to Nostr before changing admin access',
+          variant: 'destructive',
+        });
+        return;
       }
 
-      const legacyAdmins = getLegacyStoredAdmins();
-      const allExistingAdmins = [...DEFAULT_ADMIN_PUBKEYS, ...currentPubkeys, ...legacyAdmins];
-      const normalizedPubkey = pubkey.toLowerCase();
+      const normalizedPubkey = normalizePubkey(pubkey);
+      if (!normalizedPubkey) throw new Error('Invalid pubkey');
 
-      if (allExistingAdmins.some(pk => pk.toLowerCase() === normalizedPubkey)) {
+      if (authority.trustedAdmins.includes(normalizedPubkey)) {
         toast({
           title: 'Admin already exists',
           description: 'This pubkey is already an admin',
@@ -77,7 +64,8 @@ export function useAdminMutations() {
         return;
       }
 
-      const newPubkeys = [...currentPubkeys, pubkey];
+      const newPubkeys = [...authority.trustedAdmins, normalizedPubkey]
+        .filter((pk) => pk !== SITE_OWNER_PUBKEY);
 
       const event = await user.signer.signEvent({
         kind: 30078,
@@ -90,8 +78,10 @@ export function useAdminMutations() {
       });
 
       await nostr.event(event, { signal: AbortSignal.timeout(10000) });
-
-      queryClient.invalidateQueries({ queryKey: ['admin-list'] });
+      const nextAuthority = parseAuthorityEvent(event);
+      if (!nextAuthority) throw new Error('Published an invalid admin document');
+      persistAuthority(nextAuthority);
+      queryClient.setQueryData(AUTHORITY_QUERY_KEY, nextAuthority);
 
       toast({
         title: 'Admin added',
@@ -127,31 +117,21 @@ export function useAdminMutations() {
     }
 
     try {
-      const events = await nostr.query([
-        {
-          kinds: [30078],
-          authors: [SITE_OWNER_PUBKEY],
-          '#d': [ADMIN_LIST_DTAG],
-          limit: 1,
-        },
-      ]);
-
-      let currentPubkeys: string[] = [];
-      if (events.length > 0) {
-        const content = events[0].content;
-        const parsed = JSON.parse(content);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          currentPubkeys = parsed.filter(
-            (pk): pk is string => typeof pk === 'string' && /^[0-9a-fA-F]{64}$/.test(pk)
-          );
-        }
+      const refreshed = await trustedAdmin.refetch();
+      const authority = refreshed.data;
+      if (!authority || authority.freshness !== 'fresh') {
+        toast({
+          title: 'Admin list is stale',
+          description: 'Reconnect to Nostr before changing admin access',
+          variant: 'destructive',
+        });
+        return;
       }
 
-      const legacyAdmins = getLegacyStoredAdmins();
-      const allExistingAdmins = [...DEFAULT_ADMIN_PUBKEYS, ...currentPubkeys, ...legacyAdmins];
-      const normalizedPubkey = pubkey.toLowerCase();
+      const normalizedPubkey = normalizePubkey(pubkey);
+      if (!normalizedPubkey) throw new Error('Invalid pubkey');
 
-      if (!allExistingAdmins.some(pk => pk.toLowerCase() === normalizedPubkey)) {
+      if (!authority.trustedAdmins.includes(normalizedPubkey)) {
         toast({
           title: 'Admin not found',
           description: 'This pubkey is not in the admin list',
@@ -160,7 +140,17 @@ export function useAdminMutations() {
         return;
       }
 
-      const newPubkeys = currentPubkeys.filter((pk) => pk.toLowerCase() !== normalizedPubkey);
+      if (normalizedPubkey === SITE_OWNER_PUBKEY) {
+        toast({
+          title: 'Cannot remove site owner',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const newPubkeys = authority.trustedAdmins.filter(
+        (pk) => pk !== normalizedPubkey && pk !== SITE_OWNER_PUBKEY,
+      );
 
       const event = await user.signer.signEvent({
         kind: 30078,
@@ -173,8 +163,10 @@ export function useAdminMutations() {
       });
 
       await nostr.event(event, { signal: AbortSignal.timeout(10000) });
-
-      queryClient.invalidateQueries({ queryKey: ['admin-list'] });
+      const nextAuthority = parseAuthorityEvent(event);
+      if (!nextAuthority) throw new Error('Published an invalid admin document');
+      persistAuthority(nextAuthority);
+      queryClient.setQueryData(AUTHORITY_QUERY_KEY, nextAuthority);
 
       toast({
         title: 'Admin removed',

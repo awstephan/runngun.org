@@ -4,7 +4,6 @@ import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import { useSeoMeta } from '@unhead/react';
 import {
-  Target,
   MapPin,
   Clock,
   Calendar,
@@ -22,7 +21,7 @@ import { RSVPList } from '@/components/RSVPList';
 import { CommentForm } from '@/components/CommentForm';
 import { CommentSection } from '@/components/CommentSection';
 import { useEventRSVPs } from '@/hooks/useEventRSVPs';
-import { getAllAdmins } from '@/lib/admins';
+import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 import { safeUrl, safeImgUrl } from '@/lib/safeUrl';
 import type { NostrEvent } from '@nostrify/nostrify';
 import NotFound from './NotFound';
@@ -317,14 +316,17 @@ function RSVPListWithData({ eventNaddr }: { eventNaddr: string }) {
 
 function CalendarEventLoader({ kind, pubkey, identifier }: { kind: number; pubkey: string; identifier: string }) {
   const { nostr } = useNostr();
+  const trustedAdmin = useTrustedAdmin();
+  const authority = trustedAdmin.authority;
+  const isTrustedAuthor = trustedAdmin.accessFor(pubkey).status === 'trusted-admin';
 
   const { data: event, isLoading, isError } = useQuery({
-    queryKey: ['naddr-event', kind, pubkey, identifier],
+    queryKey: ['naddr-event', kind, pubkey, identifier, authority?.revision],
     queryFn: async (c) => {
       const signal = c.signal as AbortSignal;
 
       // CRITICAL: Always filter by both author AND d-tag for addressable events
-      if (!getAllAdmins().includes(pubkey)) {
+      if (!isTrustedAuthor) {
         return null; // Reject events from non-admin pubkeys
       }
 
@@ -342,6 +344,7 @@ function CalendarEventLoader({ kind, pubkey, identifier }: { kind: number; pubke
 
       return events[0] ?? null;
     },
+    enabled: Boolean(authority),
   });
 
   if (isLoading) {

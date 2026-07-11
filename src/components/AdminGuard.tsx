@@ -1,9 +1,9 @@
 import { type ReactNode } from 'react';
-import { Shield, ShieldOff, Loader2 } from 'lucide-react';
+import { Shield, ShieldOff } from 'lucide-react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useAdminList } from '@/hooks/useAdminList';
-import { DEFAULT_ADMIN_PUBKEYS } from '@/lib/config';
+import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 import { LoginArea } from '@/components/auth/LoginArea';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface AdminGuardProps {
   children: ReactNode;
@@ -17,28 +17,16 @@ interface AdminGuardProps {
  */
 export function AdminGuard({ children }: AdminGuardProps) {
   const { user } = useCurrentUser();
-  const { data: adminList, isLoading } = useAdminList();
-
-  const effectiveAdminList = adminList && adminList.length > 0 
-    ? adminList 
-    : (() => {
-        console.warn('AdminGuard: Nostr admin list is empty, falling back to DEFAULT_ADMIN_PUBKEYS');
-        return DEFAULT_ADMIN_PUBKEYS;
-      })();
-  
-  const isUserAdmin = user 
-    ? effectiveAdminList.some(pk => pk.toLowerCase() === user.pubkey.toLowerCase())
-    : false;
+  const trustedAdmin = useTrustedAdmin();
+  const access = trustedAdmin.accessFor(user?.pubkey);
 
   // Loading admin list
-  if (isLoading && !adminList) {
+  if (!trustedAdmin.authority) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-4">
         <div className="w-full max-w-sm text-center space-y-6">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full border border-primary/40 bg-primary/10 mx-auto">
-            <Loader2 className="w-8 h-8 text-primary animate-spin" />
-          </div>
-          <p className="text-sm text-muted-foreground">Checking admin access...</p>
+          <Skeleton className="w-16 h-16 rounded-full mx-auto" />
+          <Skeleton className="h-4 w-40 mx-auto" />
         </div>
       </div>
     );
@@ -76,7 +64,7 @@ export function AdminGuard({ children }: AdminGuardProps) {
   }
 
   // Logged in but not an admin
-  if (!isUserAdmin) {
+  if (access.status !== 'trusted-admin') {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-4">
         <div className="w-full max-w-sm text-center space-y-6">

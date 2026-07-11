@@ -4,15 +4,17 @@ import { useNostr } from '@nostrify/react';
 import { TEMPLATES_DTAG } from '@/lib/config';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useToast } from '@/hooks/useToast';
+import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 import type { EventTemplate } from './useTemplateList';
 
-export function useTemplateMutations(adminPubkeys: string[]) {
+export function useTemplateMutations() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const trustedAdmin = useTrustedAdmin();
 
-  const isAdmin = user ? adminPubkeys.some(pk => pk.toLowerCase() === user.pubkey.toLowerCase()) : false;
+  const isAdmin = trustedAdmin.accessFor(user?.pubkey).status === 'trusted-admin';
 
   const saveTemplate = async (template: EventTemplate) => {
     if (!user) {
@@ -26,8 +28,8 @@ export function useTemplateMutations(adminPubkeys: string[]) {
     }
 
     try {
-      const events = await nostr.query([
-        { kinds: [30078], authors: adminPubkeys, '#d': [TEMPLATES_DTAG], limit: 1 },
+      const events = await trustedAdmin.queryTrusted([
+        { kinds: [30078], '#d': [TEMPLATES_DTAG], limit: 1 },
       ]);
 
       let existingTemplates: EventTemplate[] = [];
@@ -78,8 +80,8 @@ export function useTemplateMutations(adminPubkeys: string[]) {
     }
 
     try {
-      const events = await nostr.query([
-        { kinds: [30078], authors: adminPubkeys, '#d': [TEMPLATES_DTAG], limit: 1 },
+      const events = await trustedAdmin.queryTrusted([
+        { kinds: [30078], '#d': [TEMPLATES_DTAG], limit: 1 },
       ]);
 
       if (events.length === 0) {

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { nip19 } from 'nostr-tools';
-import { MapPin, Clock, ExternalLink, Calendar, DollarSign } from 'lucide-react';
+import { MapPin, Clock, ExternalLink, Calendar } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import type { CalendarEvent } from '@/hooks/useCalendarEvents';
 import { safeImgUrl } from '@/lib/safeUrl';

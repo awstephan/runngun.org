@@ -1,7 +1,6 @@
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useAuthor } from '@/hooks/useAuthor';
 import { nip19 } from 'nostr-tools';
 import type { NostrEvent } from '@nostrify/nostrify';
 
@@ -13,10 +12,6 @@ export interface RSVPEvent {
 
 function getTag(event: NostrEvent, name: string): string | undefined {
   return event.tags.find(([t]) => t === name)?.[1];
-}
-
-function getAllTags(event: NostrEvent, name: string): string[] {
-  return event.tags.filter(([t]) => t === name).map(([, v]) => v).filter(Boolean);
 }
 
 function parseRSVP(event: NostrEvent): RSVPEvent | null {

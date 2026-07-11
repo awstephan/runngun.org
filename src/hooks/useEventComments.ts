@@ -11,10 +11,6 @@ export interface Comment {
   replyToEventId?: string;
 }
 
-function getAllTags(event: NostrEvent, name: string): string[] {
-  return event.tags.filter(([t]) => t === name).map(([, v]) => v).filter(Boolean);
-}
-
 function parseComment(event: NostrEvent): Comment {
   const eTags = event.tags.filter(([t]) => t === 'e');
   const replyTo = eTags.length > 1 ? eTags[1]?.[1] : undefined;

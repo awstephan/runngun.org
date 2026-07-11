@@ -5,7 +5,7 @@ import { nip19 } from 'nostr-tools';
 import L from 'leaflet';
 
 import { useCalendarEvents, splitEvents, type CalendarEvent } from '@/hooks/useCalendarEvents';
-import { useGeolocationList, type GeocodedLocation } from '@/hooks/useGeolocationList';
+import { useGeolocationList } from '@/hooks/useGeolocationList';
 import { Button } from '@/components/ui/button';
 
 interface GeocodedLocation {

@@ -1,7 +1,6 @@
-import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import type { NostrEvent } from '@nostrify/nostrify';
-import { getAllAdmins } from '@/lib/admins';
+import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 
 export interface CalendarEvent {
   event: NostrEvent;
@@ -75,18 +74,17 @@ export function parseCalendarEvent(event: NostrEvent): CalendarEvent {
 }
 
 export function useCalendarEvents() {
-  const { nostr } = useNostr();
-  const allAdmins = getAllAdmins();
+  const trustedAdmin = useTrustedAdmin();
+  const authority = trustedAdmin.authority;
 
   return useQuery({
-    queryKey: ['calendar-events', 'kind:31923', allAdmins],
+    queryKey: ['calendar-events', 'kind:31923', authority?.revision],
     queryFn: async (c) => {
       const signal = c.signal as AbortSignal;
-      const events = await nostr.query(
+      const events = await trustedAdmin.queryTrusted(
         [
           {
             kinds: [31923],
-            authors: getAllAdmins(),
             '#t': ['runngun'],
             limit: 100,
           },
@@ -99,6 +97,7 @@ export function useCalendarEvents() {
         .map(parseCalendarEvent)
         .sort((a, b) => a.start - b.start);
     },
+    enabled: Boolean(authority),
     staleTime: 60_000,
   });
 }

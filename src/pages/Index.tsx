@@ -16,7 +16,7 @@ const Index = () => {
   });
 
   const { data: events, isLoading, isError } = useCalendarEvents();
-  const { upcoming, past } = events ? splitEvents(events) : { upcoming: [] };
+  const { upcoming } = events ? splitEvents(events) : { upcoming: [] };
 
   return (
     <div className="min-h-screen bg-background font-sans">

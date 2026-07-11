@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { useNostr } from '@nostrify/react';
 
-import { ADMIN_LIST_DTAG, TEMPLATES_DTAG } from '@/lib/config';
+import { TEMPLATES_DTAG } from '@/lib/config';
+import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 
 export interface EventTemplate {
   id: string;
@@ -15,43 +15,17 @@ export interface EventTemplate {
   links: string[];
 }
 
-interface NostrTemplate {
-  id: string;
-  name: string;
-  title: string;
-  summary: string;
-  content: string;
-  location: string;
-  image: string;
-  links: string[];
-}
-
-function parseNostrTemplate(tags: string[][]): NostrTemplate | null {
-  const id = tags.find(([t]) => t === 'id')?.[1];
-  const name = tags.find(([t]) => t === 'name')?.[1];
-  const title = tags.find(([t]) => t === 'title')?.[1];
-  const summary = tags.find(([t]) => t === 'summary')?.[1];
-  const content = tags.find(([t]) => t === 'content')?.[1];
-  const location = tags.find(([t]) => t === 'location')?.[1];
-  const image = tags.find(([t]) => t === 'image')?.[1];
-  const links = tags.filter(([t]) => t === 'link').map(([, url]) => url);
-
-  if (!id || !name) return null;
-
-  return { id, name, title: title ?? '', summary: summary ?? '', content: content ?? '', location: location ?? '', image: image ?? '', links };
-}
-
-export function useTemplateList(adminPubkeys: string[]) {
-  const { nostr } = useNostr();
+export function useTemplateList() {
+  const trustedAdmin = useTrustedAdmin();
+  const authority = trustedAdmin.authority;
 
   const query = useQuery({
-    queryKey: ['template-list'],
+    queryKey: ['template-list', authority?.revision],
     queryFn: async ({ signal }) => {
-      const events = await nostr.query(
+      const events = await trustedAdmin.queryTrusted(
         [
           {
             kinds: [30078],
-            authors: adminPubkeys,
             '#d': [TEMPLATES_DTAG],
             limit: 1,
           },
@@ -76,6 +50,7 @@ export function useTemplateList(adminPubkeys: string[]) {
       }
       return [];
     },
+    enabled: Boolean(authority),
     staleTime: 30_000,
   });
 
