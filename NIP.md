@@ -25,4 +25,22 @@ The Site Owner publishes the addressable record with `d=runngun-admin-list`. Its
 
 ## Event Templates
 
-Each Trusted Admin may publish an addressable record with `d=runngun-event-templates`. Its `content` is a JSON array of that author's shared Schedule Event templates.
+Each Trusted Admin may publish an addressable record with `d=runngun-event-templates`. Its `content` is a JSON array of that author's shared Event Templates. The event author owns every template in their document; clients MUST NOT copy another author's document when saving or deleting templates.
+
+Each template object contains:
+
+```json
+{
+  "id": "<unique string within the author's document>",
+  "name": "<display name>",
+  "title": "<Schedule Event title>",
+  "summary": "<short summary>",
+  "content": "<description>",
+  "location": "<human-readable location>",
+  "image": "<image URL>",
+  "price": "<human-readable price>",
+  "links": ["<URL>"]
+}
+```
+
+Occurrence dates, times, and timezone are intentionally excluded and MUST be initialized when applying a template to a new Schedule Event draft.

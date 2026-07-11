@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useToast } from '@/hooks/useToast';
-import { useLocationCuration } from '@/hooks/useLocationCuration';
+import { InvalidEventDraftError, useEventAuthoring } from '@/hooks/useEventAuthoring';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,12 +15,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Loader2, Plus, X, Save, Upload, Calendar } from 'lucide-react';
+import type { ScheduleEvent } from '@/lib/schedule-event';
 import {
-  SCHEDULE_EVENT_KIND,
-  SCHEDULE_EVENT_TOPIC,
-  scheduleEventDays,
-  type ScheduleEvent,
-} from '@/lib/schedule-event';
+  createEventDraft,
+  draftFromScheduleEvent,
+  draftFromTemplate,
+  type EventDraft,
+  type EventTemplateFields,
+} from '@/lib/event-authoring';
 
 const US_TIMEZONES = [
   { value: 'America/Chicago', label: 'Central (Chicago)' },
@@ -33,114 +34,37 @@ const US_TIMEZONES = [
   { value: 'America/Phoenix', label: 'Arizona (Phoenix)' },
 ];
 
-export interface FormState {
-  title: string;
-  summary: string;
-  content: string;
-  location: string;
-  image: string;
-  price: string;
-  startDate: string;
-  startTime: string;
-  endDate: string;
-  endTime: string;
-  tzid: string;
-  links: string[];
-}
-
 interface EventFormProps {
   existing?: ScheduleEvent;
-  templateToLoad?: Partial<FormState>;
+  templateToLoad?: EventTemplateFields;
   onSuccess?: () => void;
   onCancel?: () => void;
-  onSaveTemplate?: (name: string) => void;
-  onSaveTemplateData?: (data: FormState) => void;
+  onSaveTemplate?: (name: string, draft: EventDraft) => void;
 }
 
-function toDateStr(ts: number): string {
-  const d = new Date(ts * 1000);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function toTimeStr(ts: number): string {
-  const d = new Date(ts * 1000);
-  const h = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
-  return `${h}:${min}`;
-}
-
-function toTimestamp(dateStr: string, timeStr: string): number {
-  const dt = new Date(`${dateStr}T${timeStr || '00:00'}`);
-  return Math.floor(dt.getTime() / 1000);
-}
-
-export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveTemplateData }: EventFormProps) {
-  const { mutate: publishEvent, isPending } = useNostrPublish();
+export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate }: EventFormProps) {
+  const { publishDraft, isPending } = useEventAuthoring();
   const { mutateAsync: uploadFile, isPending: isUploading } = useUploadFile();
   const { user } = useCurrentUser();
   const { toast } = useToast();
-  const { curateLocation } = useLocationCuration();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const defaultTz = US_TIMEZONES.some(tz => tz.value === browserTz) ? browserTz : 'America/Chicago';
 
-  const [form, setForm] = useState<FormState>({
-    title: '',
-    summary: '',
-    content: '',
-    location: '',
-    image: '',
-    price: '',
-    startDate: toDateStr(Math.floor(Date.now() / 1000)),
-    startTime: '08:00',
-    endDate: toDateStr(Math.floor(Date.now() / 1000)),
-    endTime: '17:00',
-    tzid: defaultTz,
-    links: [''],
-  });
+  const [form, setForm] = useState<EventDraft>(() => createEventDraft(defaultTz));
 
   useEffect(() => {
     if (!existing) return;
-    setForm({
-      title: existing.title,
-      summary: existing.summary,
-      content: existing.content,
-      location: existing.location ?? '',
-      image: existing.image ?? '',
-      price: existing.price ?? '',
-      startDate: toDateStr(existing.start),
-      startTime: toTimeStr(existing.start),
-      endDate: existing.end ? toDateStr(existing.end) : toDateStr(existing.start),
-      endTime: existing.end ? toTimeStr(existing.end) : '17:00',
-      tzid: existing.startTzid ?? browserTz,
-      links: existing.links.length > 0 ? existing.links : [''],
-    });
-  }, [browserTz, existing]);
+    setForm(draftFromScheduleEvent(existing));
+  }, [existing]);
 
   useEffect(() => {
     if (!templateToLoad) return;
-    const now = Math.floor(Date.now() / 1000);
-    setForm({
-      title: templateToLoad.title ?? '',
-      summary: templateToLoad.summary ?? '',
-      content: templateToLoad.content ?? '',
-      location: templateToLoad.location ?? '',
-      image: templateToLoad.image ?? '',
-      price: templateToLoad.price ?? '',
-      startDate: templateToLoad.startDate ?? toDateStr(now),
-      startTime: templateToLoad.startTime ?? '08:00',
-      endDate: templateToLoad.endDate ?? toDateStr(now),
-      endTime: templateToLoad.endTime ?? '17:00',
-      tzid: templateToLoad.tzid ?? defaultTz,
-      links: templateToLoad.links?.length ? templateToLoad.links : [''],
-    });
+    setForm(draftFromTemplate(templateToLoad, defaultTz));
   }, [defaultTz, templateToLoad]);
 
-  function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
+  function setField<K extends keyof EventDraft>(key: K, value: EventDraft[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -228,86 +152,29 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
   function handleSaveTemplate() {
     const name = prompt('Enter template name:');
     if (name?.trim()) {
-      onSaveTemplateData?.(form);
-      onSaveTemplate?.(name.trim());
+      onSaveTemplate?.(name.trim(), form);
     }
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-
-    if (!form.title.trim()) {
-      toast({ title: 'Title is required', variant: 'destructive' });
-      return;
+    try {
+      await publishDraft(form, existing);
+      toast({
+        title: existing ? 'Event updated' : 'Event published',
+        description: `"${form.title}" has been ${existing ? 'updated' : 'published'} to Nostr.`,
+      });
+      onSuccess?.();
+    } catch (error) {
+      console.error('Failed to publish event:', error);
+      toast({
+        title: error instanceof InvalidEventDraftError ? error.message : 'Failed to publish event',
+        description: error instanceof InvalidEventDraftError
+          ? undefined
+          : 'There was an error publishing this event to Nostr.',
+        variant: 'destructive',
+      });
     }
-    if (!form.startDate || !form.startTime) {
-      toast({ title: 'Start date and time are required', variant: 'destructive' });
-      return;
-    }
-
-    const start = toTimestamp(form.startDate, form.startTime);
-    const end = form.endDate && form.endTime
-      ? toTimestamp(form.endDate, form.endTime)
-      : undefined;
-
-    if (end && end <= start) {
-      toast({ title: 'End time must be after start time', variant: 'destructive' });
-      return;
-    }
-
-    const dTag = existing?.d ?? crypto.randomUUID();
-    const validLinks = form.links.filter((l) => l.trim().length > 0);
-    const dTags = scheduleEventDays(start, end);
-
-    const tags: string[][] = [
-      ['d', dTag],
-      ['title', form.title.trim()],
-      ['start', String(start)],
-      ['t', SCHEDULE_EVENT_TOPIC],
-      ['t', 'running'],
-      ['t', 'shooting'],
-      ['t', 'biathlon'],
-    ];
-
-    if (form.summary.trim()) tags.push(['summary', form.summary.trim()]);
-    if (end) tags.push(['end', String(end)]);
-    if (form.tzid.trim()) {
-      tags.push(['start_tzid', form.tzid.trim()]);
-      if (end) tags.push(['end_tzid', form.tzid.trim()]);
-    }
-    if (form.location.trim()) tags.push(['location', form.location.trim()]);
-    if (form.image.trim()) tags.push(['image', form.image.trim()]);
-    if (form.price.trim()) tags.push(['price', form.price.trim()]);
-    for (const link of validLinks) tags.push(['r', link.trim()]);
-    for (const day of dTags) tags.push(['D', day]);
-
-    publishEvent(
-      {
-        kind: SCHEDULE_EVENT_KIND,
-        content: form.content.trim(),
-        tags,
-      },
-      {
-        onSuccess: () => {
-          toast({
-            title: existing ? 'Event updated' : 'Event published',
-            description: `"${form.title}" has been ${existing ? 'updated' : 'published'} to Nostr.`,
-          });
-          if (form.location.trim()) {
-            curateLocation(form.location.trim());
-          }
-          onSuccess?.();
-        },
-        onError: (err) => {
-          console.error('Failed to publish event:', err);
-          toast({
-            title: 'Failed to publish event',
-            description: 'There was an error publishing this event to Nostr.',
-            variant: 'destructive',
-          });
-        },
-      },
-    );
   }
 
   return (

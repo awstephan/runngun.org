@@ -48,21 +48,20 @@ import { useScheduleEvents } from '@/hooks/useScheduleEvents';
 import {
   getScheduleEventState,
   partitionScheduleEvents,
-  scheduleEventCoordinate,
   scheduleEventNaddr,
   type ScheduleEvent,
 } from '@/lib/schedule-event';
-import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useEventAuthoring } from '@/hooks/useEventAuthoring';
 import { useToast } from '@/hooks/useToast';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useAuthors } from '@/hooks/useAuthors';
 import { useAdminMutations } from '@/hooks/useAdminMutations';
 import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
-import { useTemplateList, type EventTemplate } from '@/hooks/useTemplateList';
-import { useTemplateMutations } from '@/hooks/useTemplateMutations';
+import { useEventTemplates, type EventTemplate } from '@/hooks/useEventTemplates';
+import type { EventDraft } from '@/lib/event-authoring';
 import { SITE_OWNER_PUBKEY } from '@/lib/config';
-import { EventForm, type FormState } from '@/components/EventForm';
+import { EventForm } from '@/components/EventForm';
 import { genUserName } from '@/lib/genUserName';
 import { LoginArea } from '@/components/auth/LoginArea';
 
@@ -96,7 +95,7 @@ function EventRow({
   onDeleted: () => void;
   currentUserPubkey?: string;
 }) {
-  const { mutate: publishEvent, isPending: isDeleting } = useNostrPublish();
+  const { deleteEvent, isPending: isDeleting } = useEventAuthoring();
   const { toast } = useToast();
   const isPast = getScheduleEventState(calEvent) === 'past';
   const { data: author } = useAuthor(calEvent.event.pubkey);
@@ -108,30 +107,17 @@ function EventRow({
   const naddr = scheduleEventNaddr(calEvent);
 
   function handleDelete() {
-    // Publish NIP-09 deletion request
-    publishEvent(
-      {
-        kind: 5,
-        content: 'Deleting calendar event',
-        tags: [
-          ['e', calEvent.event.id],
-          ['a', scheduleEventCoordinate(calEvent)],
-        ],
-      },
-      {
-        onSuccess: () => {
-          toast({ title: 'Event deleted', description: `"${calEvent.title}" has been deleted.` });
-          onDeleted();
-        },
-        onError: () => {
-          toast({
-            title: 'Delete failed',
-            description: 'Could not delete this event.',
-            variant: 'destructive',
-          });
-        },
-      },
-    );
+    deleteEvent(calEvent).then(() => {
+      toast({ title: 'Event deleted', description: `"${calEvent.title}" has been deleted.` });
+      onDeleted();
+    }).catch((error: unknown) => {
+      console.error('Failed to delete event:', error);
+      toast({
+        title: 'Delete failed',
+        description: 'Could not delete this event.',
+        variant: 'destructive',
+      });
+    });
   }
 
   return (
@@ -219,7 +205,7 @@ function EventRow({
           </Link>
         </Button>
 
-        <AlertDialog>
+        {isOwner && <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
               variant="ghost"
@@ -252,7 +238,7 @@ function EventRow({
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
-        </AlertDialog>
+        </AlertDialog>}
       </div>
     </div>
   );
@@ -265,10 +251,9 @@ function EventsTab() {
   const [showForm, setShowForm] = useState(false);
   const [editingEvent, setEditingEvent] = useState<ScheduleEvent | undefined>(undefined);
   const [showPast, setShowPast] = useState(false);
-  const [templateToLoad, setTemplateToLoad] = useState<FormState | undefined>(undefined);
+  const [templateToLoad, setTemplateToLoad] = useState<EventTemplate | undefined>(undefined);
 
-  const { data: templates = [], isLoading: templatesLoading } = useTemplateList();
-  const { saveTemplate, deleteTemplate } = useTemplateMutations();
+  const { data: templates = [], isLoading: templatesLoading, saveTemplate, deleteTemplate } = useEventTemplates();
 
   const partition = events ? partitionScheduleEvents(events) : { upcoming: [], 'in-progress': [], past: [] };
   const upcoming = [...partition['in-progress'], ...partition.upcoming];
@@ -285,7 +270,7 @@ function EventsTab() {
     setShowForm(false);
     setEditingEvent(undefined);
     setTemplateToLoad(undefined);
-    queryClient.invalidateQueries({ queryKey: ['calendar-events'] });
+    queryClient.invalidateQueries({ queryKey: ['schedule-events'] });
   }
 
   function handleCancelForm() {
@@ -295,46 +280,21 @@ function EventsTab() {
   }
 
   function handleDeleted() {
-    queryClient.invalidateQueries({ queryKey: ['calendar-events'] });
+    queryClient.invalidateQueries({ queryKey: ['schedule-events'] });
   }
 
-  function handleSaveTemplate(name: string) {
-    const newTemplate: EventTemplate = {
-      id: crypto.randomUUID(),
-      name,
-      title: templateToLoad?.title ?? '',
-      summary: templateToLoad?.summary ?? '',
-      content: templateToLoad?.content ?? '',
-      location: templateToLoad?.location ?? '',
-      image: templateToLoad?.image ?? '',
-      price: templateToLoad?.price ?? '',
-      links: templateToLoad?.links ?? [],
-    };
-    saveTemplate(newTemplate);
+  function handleSaveTemplate(name: string, draft: EventDraft) {
+    saveTemplate(name, draft);
   }
 
   function handleLoadTemplate(template: EventTemplate) {
-    const formState: FormState = {
-      title: template.title,
-      summary: template.summary,
-      content: template.content,
-      location: template.location,
-      image: template.image,
-      price: template.price ?? '',
-      startDate: '',
-      startTime: '08:00',
-      endDate: '',
-      endTime: '17:00',
-      tzid: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      links: template.links?.length ? template.links : [''],
-    };
-    setTemplateToLoad(formState);
+    setTemplateToLoad(template);
     setShowForm(true);
     window.scrollTo(0, 0);
   }
 
-  function handleDeleteTemplate(id: string) {
-    deleteTemplate(id);
+  function handleDeleteTemplate(template: EventTemplate) {
+    deleteTemplate(template);
   }
 
   return (
@@ -348,7 +308,7 @@ function EventsTab() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {templates.map((t) => (
               <div
-                key={t.id}
+                key={`${t.author}:${t.id}`}
                 className="flex items-center gap-2 p-3 rounded-md border border-border bg-muted/20"
               >
                 <span className="flex-1 font-condensed text-sm font-bold truncate">{t.name}</span>
@@ -363,7 +323,8 @@ function EventsTab() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => handleDeleteTemplate(t.id)}
+                  onClick={() => handleDeleteTemplate(t)}
+                  disabled={t.author !== user?.pubkey}
                   className="size-7 text-muted-foreground hover:text-destructive"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -388,7 +349,6 @@ function EventsTab() {
             onSuccess={handleFormSuccess}
             onCancel={handleCancelForm}
             onSaveTemplate={handleSaveTemplate}
-            onSaveTemplateData={(data) => setTemplateToLoad(data)}
           />
         </div>
       ) : (
