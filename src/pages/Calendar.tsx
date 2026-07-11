@@ -305,7 +305,7 @@ const Calendar = () => {
             </Link>
             <span className="text-muted-foreground/40">·</span>
             <a
-              href="https://github.com/MartialM1nd/runngun.org"
+              href="https://github.com/awstephan/runngun.org"
               target="_blank"
               rel="noopener noreferrer"
               className="hover:text-primary transition-colors"
