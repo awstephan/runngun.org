@@ -1,12 +1,12 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useMemo, useEffect, useRef } from 'react';
 import { useSeoMeta } from '@unhead/react';
 import { Target, Shield, Github } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useScheduleEvents } from '@/hooks/useScheduleEvents';
+import { useInfiniteScheduleEvents } from '@/hooks/useScheduleEvents';
 import { partitionScheduleEvents } from '@/lib/schedule-event';
 import { EventCard, EventCardSkeleton } from '@/components/EventCard';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 50;
 
 const Schedule = () => {
   useSeoMeta({
@@ -14,33 +14,21 @@ const Schedule = () => {
     description: 'View the complete two-gun biathlon event schedule.',
   });
 
-  const { data: events, isLoading, isError } = useScheduleEvents();
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const { data, isLoading, isError, hasNextPage, fetchNextPage, isFetchingNextPage } =
+    useInfiniteScheduleEvents(PAGE_SIZE);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const events = data?.events;
 
   const activeEvents = useMemo(() => {
     const partition = events ? partitionScheduleEvents(events) : { upcoming: [], 'in-progress': [] };
     return [...partition['in-progress'], ...partition.upcoming];
   }, [events]);
 
-  const visibleEvents = useMemo(
-    () => activeEvents.slice(0, visibleCount),
-    [activeEvents, visibleCount],
-  );
-
-  const hasMore = visibleCount < activeEvents.length;
-
-  const handleLoadMore = useCallback(() => {
-    if (hasMore) {
-      setVisibleCount((prev) => prev + PAGE_SIZE);
-    }
-  }, [hasMore]);
-
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoading) {
-          handleLoadMore();
+        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+          void fetchNextPage();
         }
       },
       { threshold: 0.1, rootMargin: '100px' }
@@ -51,7 +39,7 @@ const Schedule = () => {
     }
 
     return () => observer.disconnect();
-  }, [hasMore, isLoading, handleLoadMore]);
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   return (
     <div className="min-h-screen bg-background font-sans">
@@ -105,16 +93,16 @@ const Schedule = () => {
             <EmptyState message="No upcoming events scheduled. Check back soon!" />
           )}
 
-          {!isLoading && !isError && visibleEvents.length > 0 && (
+          {!isLoading && !isError && activeEvents.length > 0 && (
             <div className="space-y-3">
-              {visibleEvents.map((ev) => (
+              {activeEvents.map((ev) => (
                 <EventCard key={ev.event.id} calEvent={ev} />
               ))}
             </div>
           )}
 
           {/* Load more trigger */}
-          {hasMore && !isLoading && (
+          {hasNextPage && !isLoading && (
             <div ref={loadMoreRef} className="h-20 flex items-center justify-center">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
@@ -123,7 +111,7 @@ const Schedule = () => {
             </div>
           )}
 
-          {!hasMore && visibleEvents.length > 0 && (
+          {!hasNextPage && activeEvents.length > 0 && (
             <div className="text-center py-8 text-sm text-muted-foreground">
               All events loaded
             </div>

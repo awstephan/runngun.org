@@ -1,66 +1,57 @@
+import type { NostrEvent } from '@nostrify/nostrify';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+
+import { decodeScheduleCoordinate, rsvpQueryKeys } from '@/hooks/useEventRSVPs';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useToast } from '@/hooks/useToast';
-import { useQueryClient } from '@tanstack/react-query';
-import { nip19 } from 'nostr-tools';
+
+export interface PublishRSVPParams {
+  eventNaddr: string;
+  status: 'going' | 'tentative';
+}
+
+export function makeRSVPEvent({ eventNaddr, status }: PublishRSVPParams): Omit<NostrEvent, 'id' | 'pubkey' | 'sig'> {
+  const coordinate = decodeScheduleCoordinate(eventNaddr);
+  if (!coordinate) throw new Error('Invalid schedule event coordinate');
+
+  return {
+    kind: 31925,
+    created_at: Math.floor(Date.now() / 1000),
+    content: '',
+    tags: [
+      ['a', coordinate.value],
+      ['d', coordinate.value],
+      ['status', status === 'going' ? 'accepted' : 'tentative'],
+      ['p', coordinate.pubkey],
+    ],
+  };
+}
 
 export function usePublishRSVP() {
-  const { mutate, isPending } = useNostrPublish();
+  const { mutateAsync: publishEvent } = useNostrPublish();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const publishRSVP = (eventNaddr: string, status: 'going' | 'tentative') => {
-    const decoded = decodeNaddr(eventNaddr);
-    if (!decoded) {
-      toast({ title: 'Invalid event', variant: 'destructive' });
-      return;
-    }
-
-    const { kind, pubkey, identifier } = decoded;
-    const aTag = `${kind}:${pubkey}:${identifier}`;
-    const dTag = `${aTag}:${status}`;
-
-    mutate(
-      {
-        kind: 31925,
-        content: '',
-        tags: [
-          ['a', aTag],
-          ['d', dTag],
-          ['status', status === 'going' ? 'accepted' : 'tentative'],
-          ['p', pubkey],
-        ],
-      },
-      {
-        onSuccess: () => {
-          toast({
-            title: status === 'going' ? 'You\'re going!' : 'Marked as maybe',
-            description: status === 'going' 
-              ? 'Your RSVP has been recorded.' 
-              : 'Your maybe response has been recorded.',
-          });
-          queryClient.invalidateQueries({ queryKey: ['rsvps'] });
-        },
-        onError: (err) => {
-          console.error('Failed to publish RSVP:', err);
-          toast({
-            title: 'Failed to RSVP',
-            description: 'There was an error recording your response.',
-            variant: 'destructive',
-          });
-        },
-      },
-    );
-  };
-
-  return { mutateAsync: publishRSVP, isPending };
-}
-
-function decodeNaddr(naddr: string): { kind: number; pubkey: string; identifier: string } | null {
-  try {
-    const decoded = nip19.decode(naddr);
-    if (decoded.type !== 'naddr') return null;
-    return decoded.data;
-  } catch {
-    return null;
-  }
+  return useMutation({
+    mutationFn: async (params: PublishRSVPParams) => publishEvent(makeRSVPEvent(params)),
+    onSuccess: async (_, { status }) => {
+      toast({
+        title: status === 'going' ? "You're going!" : 'Marked as maybe',
+        description: status === 'going'
+          ? 'Your RSVP has been recorded.'
+          : 'Your maybe response has been recorded.',
+      });
+      await queryClient.invalidateQueries({ queryKey: rsvpQueryKeys.all });
+    },
+    onError: (error) => {
+      console.error('Failed to publish RSVP:', error);
+      toast({
+        title: error instanceof Error && error.message === 'Invalid schedule event coordinate'
+          ? 'Invalid event'
+          : 'Failed to RSVP',
+        description: 'There was an error recording your response.',
+        variant: 'destructive',
+      });
+    },
+  });
 }

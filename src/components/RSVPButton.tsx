@@ -28,11 +28,11 @@ export function RSVPButton({ eventNaddr }: RSVPButtonProps) {
   const currentStatus = data?.currentUserStatus;
 
   const handleGoing = () => {
-    publishRSVP(eventNaddr, 'going');
+    void publishRSVP({ eventNaddr, status: 'going' });
   };
 
   const handleTentative = () => {
-    publishRSVP(eventNaddr, 'tentative');
+    void publishRSVP({ eventNaddr, status: 'tentative' });
   };
 
   return (

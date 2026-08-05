@@ -7,7 +7,7 @@ import Calendar from "./pages/Calendar";
 import Schedule from "./pages/Schedule";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
-import RSS from "./pages/RSS";
+import FeedRedirect from "./pages/FeedRedirect";
 import MapPage from "./pages/Map";
 
 export function AppRouter() {
@@ -24,10 +24,8 @@ export function AppRouter() {
         <Route path="/map" element={<MapPage />} />
         {/* Admin panel — Nostr auth gated */}
         <Route path="/admin" element={<Admin />} />
-        {/* RSS feed */}
-        <Route path="/feed" element={<RSS />} />
-        {/* Legacy RSS route */}
-        <Route path="/rss.xml" element={<RSS />} />
+        {/* Compatibility route; the canonical feed is a static server file. */}
+        <Route path="/feed" element={<FeedRedirect />} />
         {/* NIP-19 route for naddr1 calendar event detail pages */}
         <Route path="/:nip19" element={<NIP19Page />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

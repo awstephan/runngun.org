@@ -47,7 +47,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useScheduleEvents } from '@/hooks/useScheduleEvents';
 import {
   getScheduleEventState,
+  formatScheduleEventDate,
+  formatScheduleEventTime,
   partitionScheduleEvents,
+  scheduleEventCivilDays,
   scheduleEventNaddr,
   type ScheduleEvent,
 } from '@/lib/schedule-event';
@@ -66,23 +69,6 @@ import { genUserName } from '@/lib/genUserName';
 import { LoginArea } from '@/components/auth/LoginArea';
 
 // ─── Event Manager Tab ──────────────────────────────────────────────────────
-
-function formatDate(ts: number): string {
-  return new Date(ts * 1000).toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-}
-
-function formatTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-}
 
 function EventRow({
   calEvent,
@@ -105,6 +91,8 @@ function EventRow({
   const isOwner = currentUserPubkey?.toLowerCase() === calEvent.event.pubkey.toLowerCase();
 
   const naddr = scheduleEventNaddr(calEvent);
+  const [year, month, day] = scheduleEventCivilDays(calEvent)[0].split('-').map(Number);
+  const civilDate = new Date(Date.UTC(year, month - 1, day));
 
   function handleDelete() {
     deleteEvent(calEvent).then(() => {
@@ -131,12 +119,12 @@ function EventRow({
         <span className={`font-condensed text-xs font-bold uppercase tracking-widest ${
           isPast ? 'text-muted-foreground' : 'text-primary'
         }`}>
-          {new Date(calEvent.start * 1000).toLocaleDateString('en-US', { month: 'short' }).toUpperCase()}
+          {civilDate.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' }).toUpperCase()}
         </span>
         <span className={`font-condensed text-2xl font-bold leading-none ${
           isPast ? 'text-muted-foreground' : 'text-foreground'
         }`}>
-          {new Date(calEvent.start * 1000).getDate()}
+          {day}
         </span>
       </div>
 
@@ -155,8 +143,7 @@ function EventRow({
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="w-3 h-3" />
-            {formatDate(calEvent.start)} · {formatTime(calEvent.start)}
-            {calEvent.end && ` – ${formatTime(calEvent.end)}`}
+            {formatScheduleEventDate(calEvent)} · {formatScheduleEventTime(calEvent)}
           </span>
           {calEvent.location && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">

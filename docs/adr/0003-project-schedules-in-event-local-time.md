@@ -1,0 +1,3 @@
+# Project schedules in event-local time
+
+Schedule Event dates, month membership, and calendar grouping are projected into each event's declared IANA timezones rather than UTC or the viewer's timezone. `start_tzid` applies to the inclusive start and `end_tzid` applies to the exclusive end, falling back to `start_tzid`; an exclusive midnight therefore does not occupy its ending civil day. Invalid declared timezone identifiers make an event invalid, while absent identifiers use UTC as the deterministic projection fallback. NIP-52 `D` tags remain canonical UTC day indexes (`floor(unix_seconds / 86400)`) for interoperable relay filtering, so month retrieval widens the queried UTC `D` range for every IANA offset and then filters by event-local month.

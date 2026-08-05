@@ -1,10 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
-import { NKinds, type NostrEvent } from '@nostrify/nostrify';
+import { commentRootIdentity, commentRootKey, type CommentRoot } from '@/hooks/useComments';
 
 interface PostCommentParams {
-  root: NostrEvent | URL | `#${string}`; // The root event to comment on
-  reply?: NostrEvent | URL | `#${string}`; // Optional reply to another comment
+  root: CommentRoot;
+  reply?: CommentRoot;
   content: string;
 }
 
@@ -15,18 +15,7 @@ export function usePostComment() {
 
   return useMutation({
     mutationFn: async ({ root, reply, content }: PostCommentParams) => {
-      const tags: string[][] = [];
-
-      // Root event tags
-      tags.push(...makeCommentTags('root', root));
-
-      // Reply event tags
-      if (reply) {
-        tags.push(...makeCommentTags('reply', reply));
-      } else {
-        // If this is a top-level comment, use the root event's tags
-        tags.push(...makeCommentTags('reply', root));
-      }
+      const tags = makeCommentTags(root, reply);
 
       const event = await publishEvent({
         kind: 1111,
@@ -37,57 +26,25 @@ export function usePostComment() {
       return event;
     },
     onSuccess: (_, { root }) => {
-      const rootKey = root instanceof URL ? root.toString() : typeof root === 'string' ? root : root.id;
-
-      // Invalidate and refetch comments
       queryClient.invalidateQueries({
-        queryKey: ['nostr', 'comments', rootKey]
+        queryKey: ['nostr', 'comments', commentRootKey(root)]
       });
     },
   });
 }
 
-/** Build NIP-22 comment tags for a given scope and target */
-function makeCommentTags(scope: 'root' | 'reply', target: NostrEvent | URL | `#${string}`): string[][] {
-  const tags: string[][] = [];
+/** Build the complete NIP-22 root and parent identity tags. */
+export function makeCommentTags(root: CommentRoot, reply?: CommentRoot): string[][] {
+  return [...makeTargetTags(root, true), ...makeTargetTags(reply ?? root, false)];
+}
 
-  const d = (typeof target === 'string' || target instanceof URL)
-    ? ''
-    : target.tags.find(([name]) => name === 'd')?.[1] ?? '';
-
-  if (typeof target === 'string') {
-    tags.push(['I', target]);
-  } else if (target instanceof URL) {
-    tags.push(['I', target.toString()]);
-  } else if (NKinds.addressable(target.kind)) {
-    tags.push(['A', `${target.kind}:${target.pubkey}:${d}`]);
-  } else if (NKinds.replaceable(target.kind)) {
-    tags.push(['A', `${target.kind}:${target.pubkey}:`]);
-  } else {
-    tags.push(['E', target.id]);
-  }
-  if (typeof target === 'string') {
-    tags.push(['K', '#']);
-  } else if (target instanceof URL) {
-    switch (target.protocol) {
-      case 'http:':
-      case 'https:':
-        tags.push(['K', 'web']);
-        break;
-      default:
-        tags.push(['K', target.protocol.replace(/:$/, '')]);
-        break;
-    }
-  } else {
-    tags.push(['K', target.kind.toString()]);
-    tags.push(['P', target.pubkey]);
-  }
-
-  // Lowercase all tag names for reply scope
-  if (scope === 'reply') {
-    return tags.map(([name, ...values]) => [name.toLowerCase(), ...values]);
-  }
-
-  // Root scope: uppercase tags
+function makeTargetTags(target: CommentRoot, rootScope: boolean): string[][] {
+  const identity = commentRootIdentity(target);
+  if (!identity) throw new Error('Comment target is invalid');
+  const referenceTag = rootScope ? identity.referenceTag : identity.referenceTag.toLowerCase();
+  const tags: string[][] = [[referenceTag, identity.reference]];
+  if (!rootScope && identity.addressable && identity.eventId) tags.push(['e', identity.eventId]);
+  tags.push([rootScope ? 'K' : 'k', identity.kind]);
+  if (identity.pubkey) tags.push([rootScope ? 'P' : 'p', identity.pubkey]);
   return tags;
 }

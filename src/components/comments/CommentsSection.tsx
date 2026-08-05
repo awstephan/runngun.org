@@ -25,7 +25,7 @@ export function CommentsSection({
   limit = 500,
 }: CommentsSectionProps) {
   const { data: commentsData, isLoading, error } = useComments(root, limit);
-  const comments = commentsData?.topLevelComments || [];
+  const comments = commentsData?.comments ?? [];
 
   if (error) {
     return (
@@ -48,7 +48,7 @@ export function CommentsSection({
           <span>{title}</span>
           {!isLoading && (
             <span className="text-sm font-normal text-muted-foreground">
-              ({comments.length})
+              ({commentsData?.count ?? 0})
             </span>
           )}
         </CardTitle>
@@ -87,9 +87,9 @@ export function CommentsSection({
           <div className="space-y-4">
             {comments.map((comment) => (
               <Comment
-                key={comment.id}
+                key={comment.event.id}
                 root={root}
-                comment={comment}
+                node={comment}
               />
             ))}
           </div>

@@ -16,6 +16,10 @@ _Avoid_: Default admin, stored admin, legacy admin
 A trusted, time-based Run & Gun occurrence explicitly categorized for the Run & Gun schedule. It is upcoming before its start, in progress from its inclusive start until its exclusive end, and past afterward; without an end it is instantaneous.
 _Avoid_: Calendar item, race listing
 
+**Event-Local Civil Day**:
+A Gregorian date obtained by projecting a Schedule Event instant into its declared IANA timezone. The start uses `start_tzid`; the exclusive end uses `end_tzid`, falling back to `start_tzid`. Event-local civil days drive display and calendar membership, while NIP-52 `D` tags remain UTC day indexes used only for relay discovery.
+_Avoid_: UTC event date, viewer-local date
+
 **Location Resolution**:
 The coordinates assigned to a normalized Schedule Event location, with exact or approximate precision. A Site Owner-published resolution is curated truth; browser persistence and external geocoding provide fallback discovery only.
 _Avoid_: Geocode cache entry, map location

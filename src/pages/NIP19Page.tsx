@@ -1,7 +1,5 @@
 import { nip19 } from 'nostr-tools';
 import { useParams, Link } from 'react-router-dom';
-import { useNostr } from '@nostrify/react';
-import { useQuery } from '@tanstack/react-query';
 import { useSeoMeta } from '@unhead/react';
 import {
   MapPin,
@@ -18,43 +16,22 @@ import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RSVPButton } from '@/components/RSVPButton';
 import { RSVPList } from '@/components/RSVPList';
-import { CommentForm } from '@/components/CommentForm';
-import { CommentSection } from '@/components/CommentSection';
+import { CommentsSection } from '@/components/comments/CommentsSection';
 import { useEventRSVPs } from '@/hooks/useEventRSVPs';
-import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
+import { useScheduleEvent } from '@/hooks/useScheduleEvents';
 import {
   SCHEDULE_EVENT_KIND,
-  SCHEDULE_EVENT_TOPIC,
+  formatScheduleEventDate,
+  formatScheduleEventTime,
   getScheduleEventState,
-  parseScheduleEvent,
   scheduleEventNaddr,
   type ScheduleEvent,
 } from '@/lib/schedule-event';
 import { safeUrl, safeImgUrl } from '@/lib/safeUrl';
 import NotFound from './NotFound';
 
-function formatFullDate(ts: number, tzid?: string): string {
-  return new Date(ts * 1000).toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: tzid,
-  });
-}
-
-function formatTime(ts: number, tzid?: string): string {
-  return new Date(ts * 1000).toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-    timeZone: tzid,
-    timeZoneName: 'short',
-  });
-}
-
 function EventDetailView({ scheduleEvent }: { scheduleEvent: ScheduleEvent }) {
-  const { event, title, summary, image, location, price, start, end, startTzid: tzid, links, tags, content } = scheduleEvent;
+  const { event, title, summary, image, location, price, links, tags, content } = scheduleEvent;
   const safeImage = image ? safeImgUrl(image) : null;
   const state = getScheduleEventState(scheduleEvent);
 
@@ -147,16 +124,12 @@ function EventDetailView({ scheduleEvent }: { scheduleEvent: ScheduleEvent }) {
           <DetailRow
               icon={<Calendar className="w-4 h-4 text-primary shrink-0" />}
               label="Date"
-              value={formatFullDate(start, tzid)}
+              value={formatScheduleEventDate(scheduleEvent, { weekday: 'long', month: 'long' })}
           />
           <DetailRow
               icon={<Clock className="w-4 h-4 text-primary shrink-0" />}
               label="Time"
-              value={
-                end
-                  ? `${formatTime(start, tzid)} – ${formatTime(end, tzid)}`
-                  : formatTime(start, tzid)
-              }
+              value={formatScheduleEventTime(scheduleEvent)}
           />
           {location && (
             <DetailRow
@@ -235,16 +208,7 @@ function EventDetailView({ scheduleEvent }: { scheduleEvent: ScheduleEvent }) {
 
         <Separator className="my-6" />
 
-        {/* Comments Section */}
-        <div>
-          <h2 className="font-condensed text-lg font-bold uppercase tracking-wide text-foreground mb-4">
-            Comments
-          </h2>
-          <CommentForm eventId={event.id} authorPubkey={event.pubkey} />
-          <div className="mt-4">
-            <CommentSection eventId={event.id} authorPubkey={event.pubkey} />
-          </div>
-        </div>
+        <CommentsSection root={event} className="border-0 shadow-none" />
 
         {/* Back button */}
         <div className="mt-10">
@@ -290,39 +254,8 @@ function RSVPListWithData({ eventNaddr }: { eventNaddr: string }) {
   return <RSVPList going={data?.going ?? []} tentative={data?.tentative ?? []} />;
 }
 
-function ScheduleEventLoader({ kind, pubkey, identifier }: { kind: number; pubkey: string; identifier: string }) {
-  const { nostr } = useNostr();
-  const trustedAdmin = useTrustedAdmin();
-  const authority = trustedAdmin.authority;
-  const isTrustedAuthor = trustedAdmin.accessFor(pubkey).status === 'trusted-admin';
-
-  const { data: event, isLoading, isError } = useQuery({
-    queryKey: ['naddr-event', kind, pubkey, identifier, authority?.revision],
-    queryFn: async (c) => {
-      const signal = c.signal as AbortSignal;
-
-      // CRITICAL: Always filter by both author AND d-tag for addressable events
-      if (!isTrustedAuthor) {
-        return null; // Reject events from non-admin pubkeys
-      }
-
-      const events = await nostr.query(
-        [
-          {
-            kinds: [kind],
-            authors: [pubkey],
-            '#d': [identifier],
-            '#t': [SCHEDULE_EVENT_TOPIC],
-            limit: 1,
-          },
-        ],
-        { signal },
-      );
-
-      return events[0] ? parseScheduleEvent(events[0]) : null;
-    },
-    enabled: Boolean(authority),
-  });
+function ScheduleEventLoader({ pubkey, identifier }: { pubkey: string; identifier: string }) {
+  const { data: event, isLoading, isError } = useScheduleEvent(pubkey, identifier);
 
   if (isLoading) {
     return (
@@ -379,7 +312,7 @@ export function NIP19Page() {
       const { kind, pubkey, identifier: dTag } = decoded.data;
       if (kind !== SCHEDULE_EVENT_KIND) return <NotFound />;
       return (
-        <ScheduleEventLoader kind={kind} pubkey={pubkey} identifier={dTag} />
+        <ScheduleEventLoader pubkey={pubkey} identifier={dTag} />
       );
     }
 

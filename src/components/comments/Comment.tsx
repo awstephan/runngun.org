@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { NostrEvent } from '@nostrify/nostrify';
 import { nip19 } from 'nostr-tools';
 import { useAuthor } from '@/hooks/useAuthor';
-import { useComments } from '@/hooks/useComments';
+import type { CommentNode, CommentRoot } from '@/hooks/useComments';
 import { CommentForm } from './CommentForm';
 import { NoteContent } from '@/components/NoteContent';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -16,27 +15,27 @@ import { formatDistanceToNow } from 'date-fns';
 import { genUserName } from '@/lib/genUserName';
 
 interface CommentProps {
-  root: NostrEvent | URL | `#${string}`;
-  comment: NostrEvent;
+  root: CommentRoot;
+  node: CommentNode;
   depth?: number;
-  maxDepth?: number;
-  limit?: number;
 }
 
-export function Comment({ root, comment, depth = 0, maxDepth = 3, limit }: CommentProps) {
+const MAX_RENDER_DEPTH = 6;
+
+export function Comment({ root, node, depth = 0 }: CommentProps) {
+  const comment = node.event;
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [showReplies, setShowReplies] = useState(depth < 2); // Auto-expand first 2 levels
   
   const author = useAuthor(comment.pubkey);
-  const { data: commentsData } = useComments(root, limit);
   
   const metadata = author.data?.metadata;
   const displayName = metadata?.name ?? genUserName(comment.pubkey)
   const timeAgo = formatDistanceToNow(new Date(comment.created_at * 1000), { addSuffix: true });
 
-  // Get direct replies to this comment
-  const replies = commentsData?.getDirectReplies(comment.id) || [];
+  const replies = node.replies;
   const hasReplies = replies.length > 0;
+  const atDepthLimit = depth >= MAX_RENDER_DEPTH - 1;
 
   return (
     <div className={`space-y-3 ${depth > 0 ? 'ml-6 border-l-2 border-muted pl-4' : ''}`}>
@@ -74,15 +73,17 @@ export function Comment({ root, comment, depth = 0, maxDepth = 3, limit }: Comme
             {/* Comment Actions */}
             <div className="flex items-center justify-between pt-2">
               <div className="flex items-center space-x-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowReplyForm(!showReplyForm)}
-                  className="h-8 px-2 text-xs"
-                >
-                  <MessageSquare className="h-3 w-3 mr-1" />
-                  Reply
-                </Button>
+                {!atDepthLimit && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowReplyForm(!showReplyForm)}
+                    className="h-8 px-2 text-xs"
+                  >
+                    <MessageSquare className="h-3 w-3 mr-1" />
+                    Reply
+                  </Button>
+                )}
                 
                 {hasReplies && (
                   <Collapsible open={showReplies} onOpenChange={setShowReplies}>
@@ -119,7 +120,7 @@ export function Comment({ root, comment, depth = 0, maxDepth = 3, limit }: Comme
       </Card>
 
       {/* Reply Form */}
-      {showReplyForm && (
+      {showReplyForm && !atDepthLimit && (
         <div className="ml-6">
           <CommentForm
             root={root}
@@ -132,21 +133,24 @@ export function Comment({ root, comment, depth = 0, maxDepth = 3, limit }: Comme
       )}
 
       {/* Replies */}
-      {hasReplies && (
+      {hasReplies && !atDepthLimit && (
         <Collapsible open={showReplies} onOpenChange={setShowReplies}>
           <CollapsibleContent className="space-y-3">
             {replies.map((reply) => (
               <Comment
-                key={reply.id}
+                key={reply.event.id}
                 root={root}
-                comment={reply}
+                node={reply}
                 depth={depth + 1}
-                maxDepth={maxDepth}
-                limit={limit}
               />
             ))}
           </CollapsibleContent>
         </Collapsible>
+      )}
+      {hasReplies && atDepthLimit && (
+        <p className="ml-6 text-xs text-muted-foreground">
+          Additional replies are hidden to keep this thread readable.
+        </p>
       )}
     </div>
   );

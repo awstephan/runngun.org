@@ -1,21 +1,18 @@
 import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNostr } from '@nostrify/react';
-import type { NostrEvent, NostrFilter } from '@nostrify/nostrify';
+import type { NostrFilter } from '@nostrify/nostrify';
 
 import { ADMIN_LIST_DTAG, SITE_OWNER_PUBKEY } from '@/lib/config';
+import {
+  normalizePubkey,
+  normalizeTrustedAdmins,
+  parseAuthorityEvent,
+  type TrustedAdminAuthority,
+} from '@/lib/trusted-admin';
 
 const AUTHORITY_QUERY_KEY = ['trusted-admin-authority', SITE_OWNER_PUBKEY] as const;
 const SNAPSHOT_STORAGE_KEY = 'runngun:trusted-admin-authority:v1';
-const PUBKEY_PATTERN = /^[0-9a-f]{64}$/;
-
-export interface TrustedAdminAuthority {
-  freshness: 'fresh' | 'stale';
-  trustedAdmins: string[];
-  revision: string;
-  source: 'nostr' | 'snapshot' | 'owner-bootstrap';
-}
-
 interface PersistedAuthority {
   version: 1;
   siteOwner: string;
@@ -24,52 +21,6 @@ interface PersistedAuthority {
 }
 
 type TrustedFilter = Omit<NostrFilter, 'authors'>;
-
-function normalizePubkey(value: string): string | null {
-  const normalized = value.toLowerCase();
-  return PUBKEY_PATTERN.test(normalized) ? normalized : null;
-}
-
-function normalizeTrustedAdmins(values: string[]): string[] | null {
-  const normalized = values.map(normalizePubkey);
-  if (normalized.some((pubkey) => pubkey === null)) return null;
-
-  return [
-    SITE_OWNER_PUBKEY,
-    ...[...new Set(normalized as string[])]
-      .filter((pubkey) => pubkey !== SITE_OWNER_PUBKEY)
-      .sort(),
-  ];
-}
-
-function parseAuthorityEvent(event: NostrEvent): TrustedAdminAuthority | null {
-  if (
-    event.kind !== 30078 ||
-    event.pubkey.toLowerCase() !== SITE_OWNER_PUBKEY ||
-    !event.tags.some(([name, value]) => name === 'd' && value === ADMIN_LIST_DTAG)
-  ) {
-    return null;
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(event.content);
-    if (!Array.isArray(parsed) || !parsed.every((value) => typeof value === 'string')) {
-      return null;
-    }
-
-    const trustedAdmins = normalizeTrustedAdmins(parsed);
-    if (!trustedAdmins) return null;
-
-    return {
-      freshness: 'fresh',
-      trustedAdmins,
-      revision: event.id,
-      source: 'nostr',
-    };
-  } catch {
-    return null;
-  }
-}
 
 function readSnapshot(): TrustedAdminAuthority {
   try {
@@ -178,3 +129,4 @@ export function useTrustedAdmin() {
 }
 
 export { AUTHORITY_QUERY_KEY, normalizePubkey, normalizeTrustedAdmins, parseAuthorityEvent, persistAuthority };
+export type { TrustedAdminAuthority } from '@/lib/trusted-admin';

@@ -6,13 +6,14 @@ import { useMonthEvents } from '@/hooks/useMonthEvents';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { EventCard } from '@/components/EventCard';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import type { ScheduleEvent } from '@/lib/schedule-event';
+import { scheduleEventCivilDays, type ScheduleEvent } from '@/lib/schedule-event';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -33,10 +34,9 @@ function groupEventsByDay(
 ): Map<number, ScheduleEvent[]> {
   const map = new Map<number, ScheduleEvent[]>();
   for (const ev of events) {
-    for (const dayIndex of ev.days) {
-      const date = new Date(Number(dayIndex) * 86_400_000);
-      if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month) continue;
-      const day = date.getUTCDate();
+    for (const civilDay of scheduleEventCivilDays(ev)) {
+      const [eventYear, eventMonth, day] = civilDay.split('-').map(Number);
+      if (eventYear !== year || eventMonth !== month + 1) continue;
       const existing = map.get(day) ?? [];
       existing.push(ev);
       map.set(day, existing);
@@ -55,7 +55,7 @@ const Calendar = () => {
   const [viewDate, setViewDate] = useState(getInitialMonth);
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
-  const { events, prevMonth, nextMonth, daysInMonth, startDayOfWeek } = useMonthEvents(
+  const { events, isLoading, isError, prevMonth, nextMonth, daysInMonth, startDayOfWeek } = useMonthEvents(
     viewDate.year,
     viewDate.month
   );
@@ -113,13 +113,16 @@ const Calendar = () => {
       const isTodayCell = isToday && today.day === day;
 
       cells.push(
-        <div
+        <button
+          type="button"
           key={day}
           onClick={() => handleDayClick(day)}
+          disabled={!hasEvents}
+          aria-label={`${MONTH_NAMES[viewDate.month]} ${day}, ${viewDate.year}${hasEvents ? `, ${dayEvents.length} events` : ', no events'}`}
           className={`
-            border-b border-r border-border/50 bg-card p-1.5 cursor-pointer
+            border-b border-r border-border/50 bg-card p-1.5 text-left
             transition-all duration-200 hover:border-primary/50
-            ${hasEvents ? 'hover:bg-card/80' : ''}
+            ${hasEvents ? 'cursor-pointer hover:bg-card/80' : 'cursor-default'}
             ${isTodayCell ? 'bg-primary/5 border-primary/30' : ''}
           `}
           style={{ minHeight: '6rem' }}
@@ -146,7 +149,7 @@ const Calendar = () => {
               </div>
             )}
           </div>
-        </div>
+        </button>
       );
     }
 
@@ -235,9 +238,17 @@ const Calendar = () => {
         </div>
 
         {/* Calendar grid */}
-        <div className="grid grid-cols-7 grid-rows-6 w-full border-t border-l border-border rounded-t-lg overflow-hidden">
-          {renderCalendarGrid()}
-        </div>
+        {isLoading ? (
+          <Skeleton className="h-[36rem] w-full rounded-lg" />
+        ) : isError ? (
+          <div className="h-48 rounded-lg border border-dashed border-border flex items-center justify-center px-8 text-center text-muted-foreground">
+            Could not load this month. Check your relay connections and try again.
+          </div>
+        ) : (
+          <div className="grid grid-cols-7 grid-rows-6 w-full border-t border-l border-border rounded-t-lg overflow-hidden">
+            {renderCalendarGrid()}
+          </div>
+        )}
 
         {/* Month quick nav */}
         <div className="mt-8 flex flex-wrap gap-2 justify-center">
@@ -260,12 +271,9 @@ const Calendar = () => {
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-condensed text-xl font-bold uppercase tracking-wide">
-              {selectedDay && isToday ? 'Today' : `${monthName} ${selectedDay}, ${viewDate.year}`}
-              {selectedDay && !isToday && viewDate.month !== today.month && (
-                <span className="text-muted-foreground text-sm font-normal normal-case">
-                  {' '}({MONTH_NAMES[viewDate.month]} {selectedDay}, {viewDate.year})
-                </span>
-              )}
+              {selectedDay && isToday && selectedDay === today.day
+                ? 'Today'
+                : `${monthName} ${selectedDay}, ${viewDate.year}`}
             </DialogTitle>
           </DialogHeader>
           

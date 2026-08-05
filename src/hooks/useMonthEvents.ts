@@ -1,15 +1,10 @@
 import { useMemo } from 'react';
 import { useScheduleEvents } from '@/hooks/useScheduleEvents';
-import { scheduleEventDays, type ScheduleEvent } from '@/lib/schedule-event';
-
-function getMonthRange(year: number, month: number) {
-  const start = new Date(year, month, 1, 0, 0, 0, 0);
-  const end = new Date(year, month + 1, 0, 23, 59, 59, 999);
-  return {
-    since: Math.floor(start.getTime() / 1000),
-    until: Math.floor(end.getTime() / 1000),
-  };
-}
+import {
+  scheduleEventIntersectsMonth,
+  scheduleMonthQueryDays,
+  type ScheduleEvent,
+} from '@/lib/schedule-event';
 
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate();
@@ -31,6 +26,8 @@ function getNextMonth(year: number, month: number) {
 
 interface UseMonthEventsResult {
   events: ScheduleEvent[];
+  isLoading: boolean;
+  isError: boolean;
   year: number;
   month: number;
   daysInMonth: number;
@@ -40,12 +37,13 @@ interface UseMonthEventsResult {
 }
 
 export function useMonthEvents(year: number, month: number): UseMonthEventsResult {
-  const { since, until } = useMemo(() => getMonthRange(year, month), [year, month]);
-  const days = useMemo(() => scheduleEventDays(since, until), [since, until]);
+  const days = useMemo(() => scheduleMonthQueryDays(year, month), [year, month]);
   const query = useScheduleEvents({ days, limit: 500 });
 
   return {
-    events: query.data ?? [],
+    events: (query.data ?? []).filter((event) => scheduleEventIntersectsMonth(event, year, month)),
+    isLoading: query.isLoading,
+    isError: query.isError,
     year,
     month,
     daysInMonth: getDaysInMonth(year, month),

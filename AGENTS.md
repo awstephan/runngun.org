@@ -18,7 +18,6 @@ This project is a Nostr client application built with React 18.x, TailwindCSS 3.
 - `/src/components/`: UI components including NostrProvider for Nostr integration
   - `/src/components/ui/`: shadcn/ui components (48+ components available)
   - `/src/components/auth/`: Authentication-related components (LoginArea, LoginDialog, etc.)
-  - `/src/components/dm/`: Direct messaging UI components (DMMessagingInterface, DMConversationList, DMChatArea)
   - Zap components: `ZapButton`, `ZapDialog`, `WalletModal` for Lightning payments
 - `/src/hooks/`: Custom hooks including:
   - `useNostr`: Core Nostr protocol integration
@@ -40,9 +39,7 @@ This project is a Nostr client application built with React 18.x, TailwindCSS 3.
   - `useShakespeare`: AI chat completions with Shakespeare AI API
 - `/src/pages/`: Page components used by React Router (Index, NotFound)
 - `/src/lib/`: Utility functions and shared logic
-- `/src/contexts/`: React context providers (AppContext, NWCContext, DMContext)
-  - `useDMContext`: Hook exported from DMContext for direct messaging (NIP-04 & NIP-17)
-  - `useConversationMessages`: Hook exported from DMContext for paginated messages
+- `/src/contexts/`: React context providers (AppContext, NWCContext)
 - `/src/test/`: Testing utilities including TestApp component
 - `/public/`: Static assets
 - `App.tsx`: Main app component with provider setup (**CRITICAL**: this file is **already configured** with `QueryClientProvider`, `NostrProvider`, `UnheadProvider` and other important providers - **read this file before making changes**. Changes are usually not necessary unless adding new providers. Changing this file may break the application)

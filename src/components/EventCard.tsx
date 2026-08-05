@@ -1,73 +1,22 @@
 import { Link } from 'react-router-dom';
 import { MapPin, Clock, ExternalLink, Calendar } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { getScheduleEventState, scheduleEventNaddr, type ScheduleEvent } from '@/lib/schedule-event';
+import {
+  formatScheduleEventDate,
+  formatScheduleEventTime,
+  getScheduleEventState,
+  scheduleEventCivilDays,
+  scheduleEventNaddr,
+  type ScheduleEvent,
+} from '@/lib/schedule-event';
 import { safeImgUrl } from '@/lib/safeUrl';
 
 interface EventCardProps {
   calEvent: ScheduleEvent;
 }
 
-function formatEventDate(start: number, end?: number, tzid?: string): string {
-  const opts: Intl.DateTimeFormatOptions = {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: tzid,
-  };
-  const startStr = new Date(start * 1000).toLocaleDateString('en-US', opts);
-
-  if (!end) return startStr;
-
-  const endDate = new Date(end * 1000);
-  const startDate = new Date(start * 1000);
-  const sameDay =
-    startDate.toDateString() === endDate.toDateString();
-
-  if (sameDay) return startStr;
-
-  const endStr = endDate.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: tzid,
-  });
-  return `${startStr} – ${endStr}`;
-}
-
-function formatEventTime(start: number, end?: number, tzid?: string): string {
-  const opts: Intl.DateTimeFormatOptions = {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-    timeZone: tzid,
-    timeZoneName: tzid ? 'short' : undefined,
-  };
-  const startStr = new Date(start * 1000).toLocaleTimeString('en-US', opts);
-  if (!end) return startStr;
-
-  const endOpts: Intl.DateTimeFormatOptions = {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-    timeZone: tzid,
-    timeZoneName: tzid ? 'short' : undefined,
-  };
-  const endStr = new Date(end * 1000).toLocaleTimeString('en-US', endOpts);
-  return `${startStr} – ${endStr}`;
-}
-
-function getMonthAbbr(start: number): string {
-  return new Date(start * 1000).toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
-}
-
-function getDayNum(start: number): string {
-  return new Date(start * 1000).toLocaleDateString('en-US', { day: 'numeric' });
-}
-
 export function EventCard({ calEvent }: EventCardProps) {
-  const { title, summary, start, end, startTzid, location, image: rawImage, price } = calEvent;
+  const { title, summary, location, image: rawImage, price } = calEvent;
   const state = getScheduleEventState(calEvent);
   const isPast = state === 'past';
   const image = rawImage ? safeImgUrl(rawImage) : null;
@@ -75,10 +24,12 @@ export function EventCard({ calEvent }: EventCardProps) {
   // Build naddr for the detail link (CRITICAL: must include author for secure filtering)
   const naddr = scheduleEventNaddr(calEvent);
 
-  const dateStr = formatEventDate(start, end, startTzid);
-  const timeStr = formatEventTime(start, end, startTzid);
-  const monthAbbr = getMonthAbbr(start);
-  const dayNum = getDayNum(start);
+  const dateStr = formatScheduleEventDate(calEvent);
+  const timeStr = formatScheduleEventTime(calEvent);
+  const [year, month, day] = scheduleEventCivilDays(calEvent)[0].split('-').map(Number);
+  const civilDate = new Date(Date.UTC(year, month - 1, day));
+  const monthAbbr = civilDate.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' }).toUpperCase();
+  const dayNum = String(day);
 
   return (
     <Link

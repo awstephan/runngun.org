@@ -4,7 +4,12 @@ import { Link } from 'react-router-dom';
 import L from 'leaflet';
 
 import { useScheduleEvents } from '@/hooks/useScheduleEvents';
-import { getScheduleEventState, scheduleEventNaddr, type ScheduleEvent } from '@/lib/schedule-event';
+import {
+  formatScheduleEventDate,
+  getScheduleEventState,
+  scheduleEventNaddr,
+  type ScheduleEvent,
+} from '@/lib/schedule-event';
 import { useLocationResolutions } from '@/hooks/useLocationResolutions';
 import { normalizeLocation, type LocationResolution } from '@/lib/location-resolution';
 import { Button } from '@/components/ui/button';
@@ -22,11 +27,7 @@ function createMarkerIcon(isPast: boolean): L.DivIcon {
 function buildPopupContent(calEvent: ScheduleEvent, resolution: LocationResolution): string {
   const naddr = scheduleEventNaddr(calEvent);
 
-  const dateStr = new Date(calEvent.start * 1000).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  const dateStr = formatScheduleEventDate(calEvent, { weekday: undefined });
 
   const escapeHtml = (s: string) =>
     s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/`/g, '&#96;');
