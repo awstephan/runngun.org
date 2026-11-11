@@ -1423,3 +1423,17 @@ Before completing any task:
 4. Create a git commit with descriptive message
 
 Your task is not complete until all validation steps pass.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `awstephan/runngun.org`. Before reading or publishing tickets, read `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. Before triaging issues, read `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout: `GLOSSARY.md` and `docs/adr/`. Before exploring the codebase, read `docs/agents/domain.md`.
