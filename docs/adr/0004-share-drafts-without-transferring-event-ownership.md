@@ -1,0 +1,3 @@
+# Share drafts without transferring event ownership
+
+Event Drafts are publicly readable proposals that any current Trusted Admin may edit, publish, or delete, while publication creates a Schedule Event owned by its signer and consumes the shared draft. Preserve the draft's original creator and apply existing revocation semantics to contributions, accepting that revocation can expose an earlier revision or undo a deletion rather than permanently trusting a revoked identity's actions. For this low-volume workflow, use best-effort conflict checks and accept rare duplicate publications with manual cleanup instead of introducing a coordinating service for exclusive publication.

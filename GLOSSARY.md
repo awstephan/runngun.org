@@ -27,3 +27,7 @@ _Avoid_: Geocode cache entry, map location
 **Event Template**:
 A reusable starting point for authoring a Schedule Event. It is shared with current Trusted Admins but owned, updated, and removed only by the Trusted Admin who created it.
 _Avoid_: Event preset, shared form
+
+**Event Draft**:
+A shared, unpublished proposal for a new Schedule Event, created by a Trusted Admin and available for any Trusted Admin to edit, publish, or delete. Publication creates a Schedule Event owned by the publisher and consumes the draft; the draft retains its original creator identity throughout editing.
+_Avoid_: Approval request, pending Schedule Event
