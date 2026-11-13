@@ -62,6 +62,46 @@ beforeEach(() => {
 });
 
 describe('shared Event Draft persistence', () => {
+  it.each(['write', 'read'])('retries the same signed deletion after a %s failure and checks current authority', async (failure) => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    network.failWrite = failure === 'write';
+    network.publicRead = failure !== 'read';
+    await act(async () => { await expect(hook.result.current.deleteDraft(base)).rejects.toThrow(failure === 'write' ? 'timed out' : 'retry Delete draft'); });
+    const deletion = network.events.find((event) => event.tags.some(([tag, value]) => tag === 'op' && value === 'delete'))!;
+    setAuthority([alicePubkey]);
+    await act(async () => { await expect(hook.result.current.deleteDraft(base)).rejects.toThrow('Trusted Admin'); });
+    expect(network.writes).toBe(1);
+    setAuthority([alicePubkey, bobPubkey]);
+    network.failWrite = false;
+    network.publicRead = true;
+    await act(async () => { await hook.result.current.deleteDraft(base); });
+    expect(network.writes).toBe(2);
+    expect(network.events.filter((event) => event.tags.some(([tag, value]) => tag === 'op' && value === 'delete')).map((event) => event.id)).toEqual([deletion.id]);
+    await waitFor(() => expect(hook.result.current.data).toEqual([]));
+    await act(async () => { await expect(hook.result.current.saveDraft({ ...fields, title: 'Stale edit' }, base)).rejects.toThrow('no longer available'); });
+  });
+  it('deletes another admin’s draft and synchronizes dismissal across accounts', async () => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    expect(network.writes).toBe(0);
+    await act(async () => { await hook.result.current.deleteDraft(base); });
+    await waitFor(() => expect(hook.result.current.data).toEqual([]));
+    expect(network.events.find((event) => event.tags.some(([tag, value]) => tag === 'op' && value === 'delete'))).toMatchObject({ pubkey: bobPubkey, kind: 3523 });
+    hook.unmount();
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(alice))];
+    const other = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(other.result.current.data).toEqual([]));
+    setAuthority([alicePubkey]);
+    await act(async () => { await other.result.current.refreshDrafts(); });
+    await waitFor(() => expect(other.result.current.data).toHaveLength(1));
+  });
   it('lets another admin save a revision and refuses a stale overwrite', async () => {
     network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
     network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];

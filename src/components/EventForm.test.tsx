@@ -7,6 +7,26 @@ import { draftCreationEvent, readSharedEventDrafts, StaleEventDraftError } from 
 import { finalizeEvent, generateSecretKey } from 'nostr-tools';
 
 describe('Event Draft form', () => {
+  it('requires confirmation, cancels without deleting, and retains input after a failed deletion', async () => {
+    const remove = vi.fn().mockRejectedValue(new Error('Check your relays and retry Delete draft.'));
+    const success = vi.fn();
+    render(<TestApp><EventForm savedDraft={{ ...createEventDraft('Europe/London'), title: 'Proposal' }} onDeleteDraft={remove} onSuccess={success} /></TestApp>);
+    expect(remove).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Title/), { target: { value: 'Unsaved title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete draft' }));
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(remove).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/Title/)).toHaveValue('Unsaved title');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete draft' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm deletion' }));
+    await screen.findByText('Check your relays and retry Delete draft.');
+    expect(success).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/Title/)).toHaveValue('Unsaved title');
+    remove.mockResolvedValue(undefined);
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm deletion' }));
+    await waitFor(() => expect(success).toHaveBeenCalledOnce());
+  });
   it('edits shared fields and retains unsaved input for reconciliation when loading the latest draft', async () => {
     const fields = { ...createEventDraft('Europe/London'), title: 'Original', content: 'Original notes' };
     const record = finalizeEvent({ ...draftCreationEvent({ ...fields, title: 'Remote title' }), created_at: 1 }, generateSecretKey());

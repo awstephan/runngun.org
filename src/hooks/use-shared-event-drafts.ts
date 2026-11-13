@@ -11,7 +11,7 @@ import type { EventDraft } from '@/lib/event-authoring';
 import { draftCreationEvent, draftRevisionEvent, EVENT_DRAFT_KIND, EVENT_DRAFT_TOPIC, readSharedEventDrafts, StaleEventDraftError, type SharedEventDraft } from '@/lib/shared-event-drafts';
 
 /** A separate connection deliberately has no signer or NIP-42 authentication. */
-async function verifyPublicDraft(event: NostrEvent, urls: string[]): Promise<void> {
+async function verifyPublicDraft(event: NostrEvent, urls: string[], retryAction = 'Save draft'): Promise<void> {
   const results = await Promise.allSettled(urls.map(async (url) => {
     const relay = new NRelay1(url);
     try {
@@ -26,7 +26,7 @@ async function verifyPublicDraft(event: NostrEvent, urls: string[]): Promise<voi
     }
   }));
   if (!results.some((result) => result.status === 'fulfilled')) {
-    throw new Error('Draft sent, but public access could not be verified. Check your read/write relays, then retry Save draft to verify the same record.');
+    throw new Error(`Draft action sent, but public access could not be verified. Check your read/write relays, then retry ${retryAction} to verify the same record.`);
   }
 }
 
@@ -99,10 +99,41 @@ export function useSharedEventDrafts() {
     },
     onError: (error) => console.error('Failed to save shared Event Draft:', error),
   });
+  const deletion = useMutation({
+    mutationFn: async (draft: SharedEventDraft) => {
+      const current = (await trustedAdmin.refetch()).data?.trustedAdmins ?? [];
+      if (!user || !current.includes(user.pubkey)) throw new Error('Only a current Trusted Admin can delete an Event Draft.');
+      const urls = config.relayMetadata.relays.filter((relay) => relay.read && relay.write).map((relay) => relay.url);
+      if (!urls.length) throw new Error('Enable a public relay for both reading and writing in Relay settings.');
+      const roots = await nostr.query([{ kinds: [EVENT_DRAFT_KIND], authors: current, ids: [draft.id] }], { signal: AbortSignal.timeout(10_000) });
+      if (!readSharedEventDrafts(roots, current).some((root) => root.id === draft.id)) {
+        throw new Error('The draft creation is no longer available from the current Trusted Admins. Refresh drafts and try again.');
+      }
+      const scope = `${user.pubkey}:${draft.id}:delete`;
+      const prior = pending.current.get(scope);
+      if (prior) {
+        await publication.republish(prior.event);
+      } else {
+        submittedScope.current = scope;
+        submittedFields.current = '';
+        await publication.mutateAsync({ kind: EVENT_DRAFT_KIND, content: '', tags: [
+          ['t', EVENT_DRAFT_TOPIC], ['version', '1'], ['op', 'delete'],
+          ['e', draft.id, '', 'root'], ['alt', 'Dismiss a shared Run & Gun Event Draft'],
+        ] });
+      }
+      const saved = pending.current.get(scope);
+      if (!saved) throw new Error('The signer did not return a deletion record. Retry Delete draft.');
+      await verifyPublicDraft(saved.event, urls, 'Delete draft');
+      pending.current.delete(scope);
+      pending.current.delete(`${user.pubkey}:${draft.id}`);
+      await queryClient.invalidateQueries({ queryKey: ['shared-event-drafts'] });
+    },
+    onError: (error) => console.error('Failed to delete shared Event Draft:', error),
+  });
   const refreshDrafts = async (): Promise<void> => {
     await trustedAdmin.refetch();
     await queryClient.invalidateQueries({ queryKey: ['shared-event-drafts'] });
   };
   const saveDraft = (fields: EventDraft, base?: SharedEventDraft): Promise<void> => save.mutateAsync({ fields, base });
-  return { ...query, data: isTrusted ? query.data : undefined, saveDraft, isSaving: save.isPending, refreshDrafts };
+  return { ...query, data: isTrusted ? query.data : undefined, saveDraft, isSaving: save.isPending, deleteDraft: deletion.mutateAsync, isDeleting: deletion.isPending, refreshDrafts };
 }

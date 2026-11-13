@@ -4,6 +4,21 @@ import { createEventDraft } from '@/lib/event-authoring';
 import { draftCreationEvent, readSharedEventDrafts } from '@/lib/shared-event-drafts';
 
 describe('shared Event Draft API', () => {
+  it('honors trusted cross-admin dismissal over later revisions and revives after deleter revocation', () => {
+    const root = finalizeEvent({ ...draftCreationEvent({ ...createEventDraft('Europe/London'), title: 'Proposal' }), created_at: 100 }, generateSecretKey());
+    const deletion = finalizeEvent({ kind: 3523, content: '', created_at: 101, tags: [
+      ['t', 'runngun-event-draft'], ['version', '1'], ['op', 'delete'], ['e', root.id, '', 'root'],
+    ] }, generateSecretKey());
+    const revision = finalizeEvent({ ...root, created_at: 102, tags: [
+      ['t', 'runngun-event-draft'], ['version', '1'], ['op', 'revise'], ['title', 'Late revision'],
+      ['e', root.id, '', 'root'], ['e', root.id, '', 'previous'],
+    ] }, generateSecretKey());
+    const records = [root, deletion, revision];
+    expect(readSharedEventDrafts(records, [root.pubkey, deletion.pubkey, revision.pubkey])).toEqual([]);
+    expect(readSharedEventDrafts(records, [root.pubkey, revision.pubkey])[0].fields.title).toBe('Late revision');
+    expect(readSharedEventDrafts(records, [revision.pubkey])).toEqual([]);
+    expect(readSharedEventDrafts([root, { ...deletion, content: 'forged' }], [root.pubkey, deletion.pubkey])).toHaveLength(1);
+  });
   it('selects a trusted cross-admin revision while retaining creation provenance and honoring revocation', () => {
     const fields = { ...createEventDraft('Europe/London'), title: 'Original' };
     const root = finalizeEvent({ ...draftCreationEvent(fields), created_at: 100 }, generateSecretKey());

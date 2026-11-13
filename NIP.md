@@ -116,9 +116,31 @@ a copy of all unsaved fields for manual reconciliation. Refresh is best effort,
 not atomic: simultaneous revisions use the same deterministic ordering above.
 Unavailable drafts and failed saves keep the form mounted and its input intact.
 
+### Deletion (implemented)
+
+Any current Trusted Admin may dismiss a draft using a signed kind `3523` record
+with `['t', 'runngun-event-draft']`, `['version', '1']`, `['op', 'delete']`, and
+exactly one `e` reference: `['e', '<creation ID>', '', 'root']`. The root ID must
+be lowercase 64-character hex. No title or field snapshot is required. Publishers
+use empty content and an `alt` description. Duplicate version/operation tags and
+invalid signatures are rejected, as with creation and revision records.
+
+This is application-level dismissal, not a NIP-09 request to erase another
+author's records. A currently trusted deletion suppresses its validated,
+currently trusted creation regardless of the timestamps of any revisions.
+Revoking the deleting admin removes that action's effect; revoking the original
+creator independently hides the draft. There is no restore interface.
+
+Deletion requires confirmation in the opened draft form. Before signing, refresh
+authority and validate the signed creation. Verify anonymous readback of the
+deletion before reporting success; on failure keep the form and its unsaved input.
+Retries reuse the original signed deletion scoped to account and draft, including
+after an ambiguous write acknowledgment. Current authority is checked on retries.
+Normal list refresh discovers these operations for all admins sharing the relays.
+
 ### Follow-up operation contract
 
-Each revision, future dismissal, or consumption is a new kind `3523` record signed
+Each revision, dismissal, or future consumption is a new kind `3523` record signed
 by its actual contributor, with the same topic/version and an `op` of `revise`,
 `delete`, or `consume`. An `e` tag with marker `root` references the exact signed
 creation event ID; revisions also reference the loaded base event with marker

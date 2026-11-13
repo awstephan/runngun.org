@@ -4,6 +4,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useToast } from '@/hooks/useToast';
 import { InvalidEventDraftError, useEventAuthoring } from '@/hooks/useEventAuthoring';
 import { Button } from '@/components/ui/button';
+import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -44,9 +45,10 @@ interface EventFormProps {
   onSaveDraft?: (draft: EventDraft) => Promise<void>;
   savedDraft?: EventDraft;
   onLoadLatestDraft?: (draft: SharedEventDraft) => void;
+  onDeleteDraft?: () => Promise<void>;
 }
 
-export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveDraft, savedDraft, onLoadLatestDraft }: EventFormProps) {
+export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveDraft, savedDraft, onLoadLatestDraft, onDeleteDraft }: EventFormProps) {
   const { publishDraft, isPending } = useEventAuthoring();
   const { mutateAsync: uploadFile, isPending: isUploading } = useUploadFile();
   const { user } = useCurrentUser();
@@ -58,6 +60,9 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
 
   const [form, setForm] = useState<EventDraft>(() => savedDraft ?? createEventDraft(defaultTz));
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isDeletingDraft, setIsDeletingDraft] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
   const [latestDraft, setLatestDraft] = useState<SharedEventDraft>();
   const [unsavedCopies, setUnsavedCopies] = useState<EventDraft[]>([]);
 
@@ -209,6 +214,25 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
     }
   }
 
+  async function handleDeleteDraft() {
+    if (!onDeleteDraft || isDeletingDraft || isSavingDraft) return;
+    setIsDeletingDraft(true);
+    setDeleteError(undefined);
+    try {
+      await onDeleteDraft();
+      setDeleteOpen(false);
+      toast({ title: 'Draft deleted', description: 'Removed from the shared active workspace after synchronization.' });
+      onSuccess?.();
+    } catch (error) {
+      console.error('Failed to delete draft:', error);
+      const message = error instanceof Error ? error.message : 'Check your relays and retry Delete draft.';
+      setDeleteError(message);
+      toast({ title: 'Could not delete draft', description: message, variant: 'destructive' });
+    } finally {
+      setIsDeletingDraft(false);
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {latestDraft && <div role="alert" className="space-y-3 rounded-lg border border-primary/30 p-4">
@@ -225,7 +249,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
         <p className="text-sm text-muted-foreground">Copy any changes you want to keep into the latest draft below. Copies are retained until you save or close this form.</p>
         <Textarea id="ev-unsaved" readOnly rows={8} value={JSON.stringify(unsavedCopies, null, 2)} />
       </div>}
-      <fieldset disabled={isSavingDraft || isPending} className="space-y-5">
+      <fieldset disabled={isSavingDraft || isDeletingDraft || isPending} className="space-y-5">
       <div className="space-y-1.5">
         <Label htmlFor="ev-title" className="font-condensed font-600 uppercase text-xs tracking-wide">
           Title <span className="text-primary">*</span>
@@ -476,11 +500,30 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
       </fieldset>
       <div className="flex flex-wrap gap-3 pt-2">
         {!existing && onSaveDraft && (
-          <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={Boolean(latestDraft) || isSavingDraft || isUploading || isPending}>
+          <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={Boolean(latestDraft) || isSavingDraft || isDeletingDraft || isUploading || isPending}>
             {isSavingDraft && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             Save draft
           </Button>
         )}
+        {savedDraft && onDeleteDraft && <AlertDialog open={deleteOpen} onOpenChange={(open) => { if (!isDeletingDraft) setDeleteOpen(open); }}>
+          <AlertDialogTrigger asChild>
+            <Button type="button" variant="destructive" disabled={isSavingDraft || isDeletingDraft || isUploading || isPending}>Delete draft</Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this shared draft?</AlertDialogTitle>
+              <AlertDialogDescription>This removes the draft from every admin’s active workspace after synchronization. Public records may remain on Nostr relays. Unsaved changes will be discarded on success.</AlertDialogDescription>
+            </AlertDialogHeader>
+            {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeletingDraft}>Cancel</AlertDialogCancel>
+              <Button type="button" variant="destructive" disabled={isDeletingDraft} onClick={handleDeleteDraft}>
+                {isDeletingDraft && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Confirm deletion
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>}
         {!savedDraft && <Button
           type="submit"
           disabled={isPending || isSavingDraft}
@@ -494,7 +537,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
             type="button"
             variant="outline"
             onClick={onCancel}
-            disabled={isSavingDraft || isPending}
+            disabled={isSavingDraft || isDeletingDraft || isPending}
             className="font-condensed font-bold uppercase tracking-wide"
           >
             {savedDraft ? 'Close draft' : 'Cancel'}

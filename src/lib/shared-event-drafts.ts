@@ -40,14 +40,16 @@ export function readSharedEventDrafts(events: NostrEvent[], trustedAdmins: reado
     const single = (name: string) => event.tags.filter(([tag]) => tag === name);
     if (!event.tags.some(([tag, value]) => tag === 't' && value === EVENT_DRAFT_TOPIC) ||
       single('version').length !== 1 || single('version')[0][1] !== '1' ||
-      single('op').length !== 1 || !['create', 'revise'].includes(single('op')[0][1]) ||
-      single('title').length !== 1 || !single('title')[0][1]?.trim() ||
+      single('op').length !== 1 || !['create', 'revise', 'delete'].includes(single('op')[0][1]) ||
       Object.values(FIELD_TAGS).some((tag) => single(tag).length > 1) ||
       event.tags.some((tag) => tag.length < 2)) return false;
+    const operation = single('op')[0][1];
+    if (operation !== 'delete' && (single('title').length !== 1 || !single('title')[0][1]?.trim())) return false;
     const references = single('e');
-    if (single('op')[0][1] === 'create' ? references.length !== 0 : (
-      references.length !== 2 ||
-      ['root', 'previous'].some((marker) => references.filter((tag) => tag[3] === marker && /^[0-9a-f]{64}$/.test(tag[1])).length !== 1)
+    const markers = operation === 'delete' ? ['root'] : ['root', 'previous'];
+    if (operation === 'create' ? references.length !== 0 : (
+      references.length !== markers.length ||
+      markers.some((marker) => references.filter((tag) => tag[3] === marker && /^[0-9a-f]{64}$/.test(tag[1])).length !== 1)
     )) return false;
     try {
       // Explicit fields avoid relying on nostr-tools' cached verification symbol.
@@ -59,7 +61,9 @@ export function readSharedEventDrafts(events: NostrEvent[], trustedAdmins: reado
     seen.add(event.id);
     return true;
   });
-  const roots = records.filter((event) => event.tags.some(([tag, value]) => tag === 'op' && value === 'create'));
+  const deleted = new Set(records.filter((event) => event.tags.some(([tag, value]) => tag === 'op' && value === 'delete'))
+    .map((event) => event.tags.find((tag) => tag[0] === 'e' && tag[3] === 'root')![1]));
+  const roots = records.filter((event) => !deleted.has(event.id) && event.tags.some(([tag, value]) => tag === 'op' && value === 'create'));
   return roots.map((root) => {
     const event = [root, ...records.filter((record) => record.tags.some((tag) => tag[0] === 'e' && tag[1] === root.id && tag[3] === 'root'))]
       .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id))[0];
