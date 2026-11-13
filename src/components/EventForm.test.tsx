@@ -8,7 +8,7 @@ import { finalizeEvent, generateSecretKey } from 'nostr-tools';
 
 describe('Event Draft form', () => {
   it('requires confirmation, cancels without deleting, and retains input after a failed deletion', async () => {
-    const remove = vi.fn().mockRejectedValue(new Error('Check your relays and retry Delete draft.'));
+    const remove = vi.fn().mockRejectedValue(new Error('Acknowledgment timed out'));
     const success = vi.fn();
     render(<TestApp><EventForm savedDraft={{ ...createEventDraft('Europe/London'), title: 'Proposal' }} onDeleteDraft={remove} onSuccess={success} /></TestApp>);
     expect(remove).not.toHaveBeenCalled();
@@ -20,7 +20,7 @@ describe('Event Draft form', () => {
     expect(screen.getByLabelText(/Title/)).toHaveValue('Unsaved title');
     fireEvent.click(screen.getByRole('button', { name: 'Delete draft' }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm deletion' }));
-    await screen.findByText('Check your relays and retry Delete draft.');
+    await screen.findByText(/Acknowledgment timed out.*Check your signer and relay connections.*same signed deletion/);
     expect(success).not.toHaveBeenCalled();
     expect(screen.getByLabelText(/Title/)).toHaveValue('Unsaved title');
     remove.mockResolvedValue(undefined);

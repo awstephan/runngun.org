@@ -225,7 +225,8 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
       onSuccess?.();
     } catch (error) {
       console.error('Failed to delete draft:', error);
-      const message = error instanceof Error ? error.message : 'Check your relays and retry Delete draft.';
+      const reason = error instanceof Error ? error.message : 'Deletion could not be verified.';
+      const message = `${reason} Check your signer and relay connections, then retry Confirm deletion. If a deletion was already signed, retrying sends the same signed deletion; it may already be visible to other admins. Your unsaved fields are retained.`;
       setDeleteError(message);
       toast({ title: 'Could not delete draft', description: message, variant: 'destructive' });
     } finally {

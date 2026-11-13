@@ -91,6 +91,15 @@ export function draftRevisionEvent(fields: EventDraft, base: SharedEventDraft): 
   };
 }
 
+export function draftDeletionEvent(draft: SharedEventDraft): Pick<NostrEvent, 'kind' | 'content' | 'tags'> {
+  return {
+    kind: EVENT_DRAFT_KIND, content: '', tags: [
+      ['t', EVENT_DRAFT_TOPIC], ['version', '1'], ['op', 'delete'],
+      ['e', draft.id, '', 'root'], ['alt', 'Dismiss a shared Run & Gun Event Draft'],
+    ],
+  };
+}
+
 export class StaleEventDraftError extends Error {
   constructor(public readonly latest: SharedEventDraft) {
     super('This draft has changed. Load the latest draft and reconcile your unsaved fields before saving.');

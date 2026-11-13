@@ -8,7 +8,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 import type { EventDraft } from '@/lib/event-authoring';
-import { draftCreationEvent, draftRevisionEvent, EVENT_DRAFT_KIND, EVENT_DRAFT_TOPIC, readSharedEventDrafts, StaleEventDraftError, type SharedEventDraft } from '@/lib/shared-event-drafts';
+import { draftCreationEvent, draftDeletionEvent, draftRevisionEvent, EVENT_DRAFT_KIND, EVENT_DRAFT_TOPIC, readSharedEventDrafts, StaleEventDraftError, type SharedEventDraft } from '@/lib/shared-event-drafts';
 
 /** A separate connection deliberately has no signer or NIP-42 authentication. */
 async function verifyPublicDraft(event: NostrEvent, urls: string[], retryAction = 'Save draft'): Promise<void> {
@@ -116,10 +116,7 @@ export function useSharedEventDrafts() {
       } else {
         submittedScope.current = scope;
         submittedFields.current = '';
-        await publication.mutateAsync({ kind: EVENT_DRAFT_KIND, content: '', tags: [
-          ['t', EVENT_DRAFT_TOPIC], ['version', '1'], ['op', 'delete'],
-          ['e', draft.id, '', 'root'], ['alt', 'Dismiss a shared Run & Gun Event Draft'],
-        ] });
+        await publication.mutateAsync(draftDeletionEvent(draft));
       }
       const saved = pending.current.get(scope);
       if (!saved) throw new Error('The signer did not return a deletion record. Retry Delete draft.');
