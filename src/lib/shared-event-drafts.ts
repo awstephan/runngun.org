@@ -1,6 +1,7 @@
 import type { NostrEvent } from '@nostrify/nostrify';
 import { verifyEvent } from 'nostr-tools';
 import type { EventDraft } from '@/lib/event-authoring';
+import { parseScheduleEvent, SCHEDULE_EVENT_KIND } from '@/lib/schedule-event';
 
 export const EVENT_DRAFT_KIND = 3523;
 export const EVENT_DRAFT_TOPIC = 'runngun-event-draft';
@@ -40,13 +41,13 @@ export function readSharedEventDrafts(events: NostrEvent[], trustedAdmins: reado
     const single = (name: string) => event.tags.filter(([tag]) => tag === name);
     if (!event.tags.some(([tag, value]) => tag === 't' && value === EVENT_DRAFT_TOPIC) ||
       single('version').length !== 1 || single('version')[0][1] !== '1' ||
-      single('op').length !== 1 || !['create', 'revise', 'delete'].includes(single('op')[0][1]) ||
+      single('op').length !== 1 || !['create', 'revise', 'delete', 'consume'].includes(single('op')[0][1]) ||
       Object.values(FIELD_TAGS).some((tag) => single(tag).length > 1) ||
       event.tags.some((tag) => tag.length < 2)) return false;
     const operation = single('op')[0][1];
-    if (operation !== 'delete' && (single('title').length !== 1 || !single('title')[0][1]?.trim())) return false;
+    if (['create', 'revise'].includes(operation) && (single('title').length !== 1 || !single('title')[0][1]?.trim())) return false;
     const references = single('e');
-    const markers = operation === 'delete' ? ['root'] : ['root', 'previous'];
+    const markers = operation === 'consume' ? ['root', 'published'] : operation === 'delete' ? ['root'] : ['root', 'previous'];
     if (operation === 'create' ? references.length !== 0 : (
       references.length !== markers.length ||
       markers.some((marker) => references.filter((tag) => tag[3] === marker && /^[0-9a-f]{64}$/.test(tag[1])).length !== 1)
@@ -61,8 +62,11 @@ export function readSharedEventDrafts(events: NostrEvent[], trustedAdmins: reado
     seen.add(event.id);
     return true;
   });
-  const deleted = new Set(records.filter((event) => event.tags.some(([tag, value]) => tag === 'op' && value === 'delete'))
+  const deleted = new Set(records.filter((event) => event.tags.some(([tag, value]) => tag === 'op' && ['delete', 'consume'].includes(value)))
     .map((event) => event.tags.find((tag) => tag[0] === 'e' && tag[3] === 'root')![1]));
+  for (const event of draftPublications(events, trustedAdmins)) {
+    deleted.add(event.tags.find((tag) => tag[0] === 'e' && tag[3] === 'root')![1]);
+  }
   const roots = records.filter((event) => !deleted.has(event.id) && event.tags.some(([tag, value]) => tag === 'op' && value === 'create'));
   return roots.map((root) => {
     const event = [root, ...records.filter((record) => record.tags.some((tag) => tag[0] === 'e' && tag[1] === root.id && tag[3] === 'root'))]
@@ -81,6 +85,21 @@ export function readSharedEventDrafts(events: NostrEvent[], trustedAdmins: reado
   }).sort((a, b) => b.event.created_at - a.event.created_at || a.event.id.localeCompare(b.event.id));
 }
 
+/** A visible, signed Schedule Event is itself proof of draft consumption. */
+export function draftPublications(events: NostrEvent[], trustedAdmins: readonly string[]): NostrEvent[] {
+  return events.filter((event) => {
+    if (event.kind !== SCHEDULE_EVENT_KIND || !trustedAdmins.includes(event.pubkey)) return false;
+    const roots = event.tags.filter((tag) => tag[0] === 'e' && tag[3] === 'root');
+    if (roots.length !== 1 || !/^[0-9a-f]{64}$/.test(roots[0][1])) return false;
+    try {
+      const { id, pubkey, sig, kind, content, tags, created_at } = event;
+      return verifyEvent({ id, pubkey, sig, kind, content, tags, created_at }) && Boolean(parseScheduleEvent(event));
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function draftRevisionEvent(fields: EventDraft, base: SharedEventDraft): Pick<NostrEvent, 'kind' | 'content' | 'tags' | 'created_at'> {
   const snapshot = draftCreationEvent(fields);
   return {
@@ -96,6 +115,16 @@ export function draftDeletionEvent(draft: SharedEventDraft): Pick<NostrEvent, 'k
     kind: EVENT_DRAFT_KIND, content: '', tags: [
       ['t', EVENT_DRAFT_TOPIC], ['version', '1'], ['op', 'delete'],
       ['e', draft.id, '', 'root'], ['alt', 'Dismiss a shared Run & Gun Event Draft'],
+    ],
+  };
+}
+
+export function draftConsumptionEvent(draft: SharedEventDraft, published: NostrEvent): Pick<NostrEvent, 'kind' | 'content' | 'tags'> {
+  return {
+    kind: EVENT_DRAFT_KIND, content: '', tags: [
+      ['t', EVENT_DRAFT_TOPIC], ['version', '1'], ['op', 'consume'],
+      ['e', draft.id, '', 'root'], ['e', published.id, '', 'published'],
+      ['alt', 'Consume a shared Run & Gun Event Draft after publication'],
     ],
   };
 }

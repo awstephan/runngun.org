@@ -1,26 +1,35 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { finalizeEvent, generateSecretKey, getPublicKey, matchFilters, nip19 } from 'nostr-tools';
-import type { NostrEvent, NostrFilter } from '@nostrify/nostrify';
+import { NSecSigner, type NostrEvent, type NostrFilter } from '@nostrify/nostrify';
 import { NLogin } from '@nostrify/react/login';
 import { TestApp } from '@/test/TestApp';
 import { useSharedEventDrafts } from '@/hooks/use-shared-event-drafts';
 import { createEventDraft } from '@/lib/event-authoring';
 import { draftCreationEvent, draftRevisionEvent, StaleEventDraftError } from '@/lib/shared-event-drafts';
 import { ADMIN_LIST_DTAG, SITE_OWNER_PUBKEY } from '@/lib/config';
+import { parseScheduleEvent, scheduleEventCivilDays } from '@/lib/schedule-event';
+import { useEventAuthoring } from '@/hooks/useEventAuthoring';
+import { useScheduleEvents } from '@/hooks/useScheduleEvents';
 
 const network = vi.hoisted(() => ({
   events: [] as NostrEvent[],
+  attempts: [] as NostrEvent[],
   logins: [] as ReturnType<typeof NLogin.fromNsec>[],
   publicRead: true,
   writes: 0,
   failWrite: false,
+  failConsumption: false,
+  rejectWrite: false,
 }));
 vi.mock('@nostrify/react', async (original) => ({
   ...await original<typeof import('@nostrify/react')>(),
   useNostr: () => ({ nostr: {
     query: async (filters: NostrFilter[]) => network.events.filter((event) => matchFilters(filters, event)),
     event: async (event: NostrEvent) => {
+      network.attempts.push(event);
+      if (network.rejectWrite) throw new Error('Relay disconnected');
+      if (network.failConsumption && event.tags.some(([tag, value]) => tag === 'op' && value === 'consume')) throw new Error('Consumption unavailable');
       if (!network.events.some((stored) => stored.id === event.id)) network.events.push(event);
       network.writes++;
       if (network.failWrite) throw new Error('Acknowledgment timed out');
@@ -46,6 +55,7 @@ const bob = generateSecretKey();
 const alicePubkey = getPublicKey(alice);
 const bobPubkey = getPublicKey(bob);
 const fields = { ...createEventDraft('Europe/London'), title: 'Shared proposal', startDate: '', startTime: '', endDate: '', endTime: '' };
+const scheduled = { ...fields, startDate: '2027-07-12', startTime: '00:30', endDate: '2027-07-13', endTime: '00:00' };
 function setAuthority(pubkeys: string[]) {
   network.events = network.events.filter((event) => event.kind !== 30078);
   network.events.push({ id: crypto.randomUUID(), pubkey: SITE_OWNER_PUBKEY, kind: 30078, content: JSON.stringify(pubkeys), tags: [['d', ADMIN_LIST_DTAG]], created_at: 1, sig: '' });
@@ -54,14 +64,165 @@ function setAuthority(pubkeys: string[]) {
 beforeEach(() => {
   localStorage.clear();
   network.events = [];
+  network.attempts = [];
   network.writes = 0;
   network.publicRead = true;
   network.failWrite = false;
+  network.failConsumption = false;
+  network.rejectWrite = false;
   network.logins = [NLogin.fromNsec(nip19.nsecEncode(alice))];
   setAuthority([alicePubkey, bobPubkey]);
 });
 
 describe('shared Event Draft persistence', () => {
+  it('does not retransmit an uncertain older publication after reconciling a newer draft revision', async () => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    network.rejectWrite = true;
+    await act(async () => { await expect(hook.result.current.publishDraft(scheduled, base)).rejects.toThrow(); });
+    network.rejectWrite = false;
+    network.events.push(finalizeEvent(draftRevisionEvent({ ...fields, title: 'New revision' }, base), alice));
+    await act(async () => { await expect(hook.result.current.publishDraft(scheduled, base)).rejects.toBeInstanceOf(StaleEventDraftError); });
+    await act(async () => { await hook.result.current.refreshDrafts(); });
+    const latest = hook.result.current.data![0];
+    await act(async () => { await expect(hook.result.current.publishDraft(scheduled, latest)).rejects.toThrow('older revision'); });
+    expect(network.attempts).toHaveLength(1);
+  });
+  it.each([
+    { ...scheduled, title: '' },
+    { ...scheduled, startTime: '' },
+    { ...scheduled, tzid: 'Invalid/Timezone' },
+    { ...scheduled, endDate: '2027-07-11' },
+    { ...scheduled, startDate: '2027-03-28', startTime: '01:30' },
+  ])('rejects invalid Schedule Event data before signing: %j', async (invalid) => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    await act(async () => { await expect(hook.result.current.publishDraft(invalid, hook.result.current.data![0])).rejects.toThrow(); });
+    expect(network.attempts).toEqual([]);
+    expect(hook.result.current.data).toHaveLength(1);
+  });
+  it('retains the draft when signing fails and can publish after the signer recovers', async () => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    const signing = vi.spyOn(NSecSigner.prototype, 'signEvent').mockRejectedValueOnce(new Error('Signer declined'));
+    await act(async () => { await expect(hook.result.current.publishDraft(scheduled, base)).rejects.toThrow('Signer declined'); });
+    expect(network.attempts).toEqual([]);
+    expect(hook.result.current.data).toHaveLength(1);
+    signing.mockRestore();
+    await act(async () => { await hook.result.current.publishDraft(scheduled, base); });
+    await waitFor(() => expect(hook.result.current.data).toEqual([]));
+  });
+  it('refreshes before publishing, refuses stale input and consumed drafts, and rechecks publisher trust', async () => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    network.events.push(finalizeEvent(draftRevisionEvent({ ...fields, title: 'Remote edit' }, base), alice));
+    await act(async () => { await expect(hook.result.current.publishDraft(scheduled, base)).rejects.toBeInstanceOf(StaleEventDraftError); });
+    expect(network.attempts).toEqual([]);
+    await act(async () => { await hook.result.current.refreshDrafts(); });
+    const latest = hook.result.current.data![0];
+    setAuthority([alicePubkey]);
+    await act(async () => { await expect(hook.result.current.publishDraft(scheduled, latest)).rejects.toThrow('Trusted Admin'); });
+    expect(network.attempts).toEqual([]);
+    setAuthority([alicePubkey, bobPubkey]);
+    await act(async () => { await hook.result.current.publishDraft(scheduled, latest); });
+    const attempts = network.attempts.length;
+    await act(async () => { await expect(hook.result.current.publishDraft(scheduled, latest)).rejects.toThrow('already consumed'); });
+    await act(async () => { await expect(hook.result.current.saveDraft(fields, latest)).rejects.toThrow('no longer available'); });
+    expect(network.attempts).toHaveLength(attempts);
+  });
+  it('keeps publication ownership, trust, and provenance when its creator is revoked and the publisher edits', async () => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(() => ({ drafts: useSharedEventDrafts(), authoring: useEventAuthoring(), schedule: useScheduleEvents() }), { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.drafts.data).toHaveLength(1));
+    const base = hook.result.current.drafts.data![0];
+    await act(async () => { await hook.result.current.drafts.publishDraft(scheduled, base); });
+    setAuthority([bobPubkey]);
+    await act(async () => { await hook.result.current.drafts.refreshDrafts(); });
+    await waitFor(() => expect(hook.result.current.schedule.data).toHaveLength(1));
+    const published = hook.result.current.schedule.data![0];
+    expect(published.event.pubkey).toBe(bobPubkey);
+    await act(async () => { await hook.result.current.authoring.publishDraft({ ...scheduled, title: 'Publisher edit' }, published); });
+    const edited = network.attempts.at(-1)!;
+    expect(edited.pubkey).toBe(bobPubkey);
+    expect(edited.tags).toContainEqual(['d', published.d]);
+    expect(edited.tags).toContainEqual(['e', base.id, '', 'root']);
+    setAuthority([alicePubkey]);
+    await act(async () => { await hook.result.current.drafts.refreshDrafts(); });
+    await waitFor(() => expect(hook.result.current.schedule.data).toEqual([]));
+  });
+  it('recovers the same signed publication after reopening, preserving newer input', async () => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    network.rejectWrite = true;
+    await act(async () => { await expect(hook.result.current.publishDraft(scheduled, base)).rejects.toThrow('disconnected'); });
+    const signed = network.attempts[0];
+    hook.unmount();
+    network.rejectWrite = false;
+    const reopened = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(reopened.result.current.data).toHaveLength(1));
+    await act(async () => { await expect(reopened.result.current.publishDraft({ ...scheduled, title: 'New input' }, base)).rejects.toThrow('newer input is retained'); });
+    expect(network.events.filter((event) => event.kind === 31923).map((event) => event.id)).toEqual([signed.id]);
+    expect(network.events.find((event) => event.kind === 31923)?.tags).toContainEqual(['title', 'Shared proposal']);
+  });
+  it.each(['write', 'read', 'consume'])('recovers a %s failure without signing a second Schedule Event', async (failure) => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    network.failWrite = failure === 'write';
+    network.publicRead = failure !== 'read';
+    network.failConsumption = failure === 'consume';
+    await act(async () => { await expect(hook.result.current.publishDraft(scheduled, base)).rejects.toThrow(); });
+    const published = network.events.find((event) => event.kind === 31923)!;
+    await act(async () => { await hook.result.current.refreshDrafts(); });
+    await waitFor(() => expect(hook.result.current.data).toEqual([]));
+    network.failWrite = false;
+    network.publicRead = true;
+    network.failConsumption = false;
+    await act(async () => { await hook.result.current.publishDraft(scheduled, base); });
+    expect(network.events.filter((event) => event.kind === 31923).map((event) => event.id)).toEqual([published.id]);
+    const consumption = network.events.find((event) => event.tags.some(([tag, value]) => tag === 'op' && value === 'consume'))!;
+    expect(consumption.pubkey).toBe(bobPubkey);
+    expect(consumption.tags).toContainEqual(['e', published.id, '', 'published']);
+    // A relay can remove a deleted/replaced Schedule Event; its regular consumption survives.
+    network.events = network.events.filter((event) => event.id !== published.id);
+    await act(async () => { await hook.result.current.refreshDrafts(); });
+    await waitFor(() => expect(hook.result.current.data).toEqual([]));
+  });
+  it('publishes another admin’s draft under the connected signer and consumes it for both admins', async () => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    await act(async () => { await hook.result.current.publishDraft(scheduled, base); });
+    const published = network.events.find((event) => event.kind === 31923)!;
+    expect(published.pubkey).toBe(bobPubkey);
+    expect(published.tags).toContainEqual(['e', base.id, '', 'root']);
+    const occurrence = parseScheduleEvent(published)!;
+    expect(occurrence.start).toBe(Date.parse('2027-07-11T23:30:00Z') / 1000);
+    expect(occurrence.startTzid).toBe('Europe/London');
+    expect(scheduleEventCivilDays(occurrence)).toEqual(['2027-07-12']);
+    await waitFor(() => expect(hook.result.current.data).toEqual([]));
+    hook.unmount();
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(alice))];
+    const other = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(other.result.current.data).toEqual([]));
+  });
   it.each(['write', 'read'])('retries the same signed deletion after a %s failure and checks current authority', async (failure) => {
     network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
     network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];

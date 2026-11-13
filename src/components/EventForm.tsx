@@ -22,6 +22,7 @@ import {
   createEventDraft,
   draftFromScheduleEvent,
   draftFromTemplate,
+  eventFromDraft,
   type EventDraft,
   type EventTemplateFields,
 } from '@/lib/event-authoring';
@@ -46,10 +47,11 @@ interface EventFormProps {
   savedDraft?: EventDraft;
   onLoadLatestDraft?: (draft: SharedEventDraft) => void;
   onDeleteDraft?: () => Promise<void>;
+  onPublishDraft?: (draft: EventDraft) => Promise<void>;
 }
 
-export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveDraft, savedDraft, onLoadLatestDraft, onDeleteDraft }: EventFormProps) {
-  const { publishDraft, isPending } = useEventAuthoring();
+export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveDraft, savedDraft, onLoadLatestDraft, onDeleteDraft, onPublishDraft }: EventFormProps) {
+  const { publishDraft, isPending: isAuthoring } = useEventAuthoring();
   const { mutateAsync: uploadFile, isPending: isUploading } = useUploadFile();
   const { user } = useCurrentUser();
   const { toast } = useToast();
@@ -60,6 +62,9 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
 
   const [form, setForm] = useState<EventDraft>(() => savedDraft ?? createEventDraft(defaultTz));
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isPublishingDraft, setIsPublishingDraft] = useState(false);
+  const [publishError, setPublishError] = useState<string>();
+  const isPending = isAuthoring || isPublishingDraft;
   const [isDeletingDraft, setIsDeletingDraft] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string>();
@@ -174,9 +179,17 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (savedDraft || isSavingDraft) return;
+    if (isSavingDraft || isDeletingDraft || isPending || isUploading || latestDraft || (savedDraft && !onPublishDraft)) return;
+    setIsPublishingDraft(true);
+    setPublishError(undefined);
     try {
-      await publishDraft(form, existing);
+      if (savedDraft && onPublishDraft) {
+        const result = eventFromDraft(form, 'validation');
+        if (!result.ok) throw new InvalidEventDraftError(result.message);
+        await onPublishDraft(form);
+      } else {
+        await publishDraft(form, existing);
+      }
       toast({
         title: existing ? 'Event updated' : 'Event published',
         description: `"${form.title}" has been ${existing ? 'updated' : 'published'} to Nostr.`,
@@ -184,13 +197,18 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
       onSuccess?.();
     } catch (error) {
       console.error('Failed to publish event:', error);
+      if (error instanceof StaleEventDraftError) setLatestDraft(error.latest);
+      const message = error instanceof Error ? error.message : 'There was an error publishing this event to Nostr.';
+      setPublishError(message);
       toast({
         title: error instanceof InvalidEventDraftError ? error.message : 'Failed to publish event',
         description: error instanceof InvalidEventDraftError
           ? undefined
-          : 'There was an error publishing this event to Nostr.',
+          : message,
         variant: 'destructive',
       });
+    } finally {
+      setIsPublishingDraft(false);
     }
   }
 
@@ -237,7 +255,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {latestDraft && <div role="alert" className="space-y-3 rounded-lg border border-primary/30 p-4">
-        <p className="text-sm">This draft has changed. Load the latest draft before saving. A copy of your unsaved fields will remain below for reconciliation.</p>
+        <p className="text-sm">This draft has changed. Load the latest draft before saving or publishing. A copy of your unsaved fields will remain below for reconciliation.</p>
         <Button type="button" variant="outline" disabled={isSavingDraft} onClick={() => {
           setUnsavedCopies((copies) => [...copies, { ...form, links: [...form.links] }]);
           setForm({ ...latestDraft.fields, links: [...latestDraft.fields.links] });
@@ -499,6 +517,10 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
       </div>
 
       </fieldset>
+      {publishError && <div role="alert" className="space-y-2 text-sm text-destructive">
+        <p>{publishError}</p>
+        {savedDraft && <p>Your input is retained. Check your signer and relays, then retry Publish Event. If a publication was already signed, retrying recovers that same Schedule Event; it may already be visible to other admins.</p>}
+      </div>}
       <div className="flex flex-wrap gap-3 pt-2">
         {!existing && onSaveDraft && (
           <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={Boolean(latestDraft) || isSavingDraft || isDeletingDraft || isUploading || isPending}>
@@ -525,9 +547,9 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>}
-        {!savedDraft && <Button
+        {(!savedDraft || onPublishDraft) && <Button
           type="submit"
-          disabled={isPending || isSavingDraft}
+          disabled={Boolean(latestDraft) || isPending || isSavingDraft || isDeletingDraft || isUploading}
           className="font-condensed font-bold uppercase tracking-wide bg-primary text-primary-foreground hover:bg-primary/90"
         >
           {isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}

@@ -25,6 +25,10 @@ export function useEventAuthoring() {
     const result = eventFromDraft(draft, existing?.d ?? crypto.randomUUID());
     if (!result.ok) throw new InvalidEventDraftError(result.message);
 
+    // Keep shared-draft provenance on addressable replacements as well as initial publication.
+    if (existing) {
+      result.event.tags.push(...existing.event.tags.filter((tag) => tag[0] === 'e' && tag[3] === 'root'));
+    }
     await publication.mutateAsync(result.event);
     await queryClient.invalidateQueries({ queryKey: ['schedule-events'] });
 

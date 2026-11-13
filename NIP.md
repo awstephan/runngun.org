@@ -138,9 +138,51 @@ Retries reuse the original signed deletion scoped to account and draft, includin
 after an ambiguous write acknowledgment. Current authority is checked on retries.
 Normal list refresh discovers these operations for all admins sharing the relays.
 
-### Follow-up operation contract
+### Publication and consumption (implemented)
 
-Each revision, dismissal, or future consumption is a new kind `3523` record signed
+Any current Trusted Admin can publish a shared draft using their connected signer.
+Refresh authority and the draft's creation, contributions, and Schedule Events
+referencing its root before publishing. Reject consumed/unavailable drafts and
+require the established Load latest draft reconciliation for stale snapshots.
+Validate complete Schedule Event fields with the normal authoring validation,
+including the declared IANA timezone and event-local civil date/time conversion.
+
+The resulting kind `31923` NIP-52 Schedule Event carries
+`['e', '<creation ID>', '', 'root']` and
+`['e', '<loaded snapshot ID>', '', 'previous']`. The publisher owns the occurrence;
+its trust is independent of the creator or earlier contributors. Editing the
+published occurrence preserves its root provenance. A valid, signed, currently
+trusted Schedule Event with exactly one hex root reference suppresses that draft
+even when the follow-up consumption write is interrupted. Discovery includes
+trusted kind `31923` Schedule Events alongside kind `3523` draft contributions.
+
+After anonymous readback of the publication, the publisher signs kind `3523` with
+`['t', 'runngun-event-draft']`, `['version', '1']`, `['op', 'consume']`, exactly
+two hex `e` references marked `root` (creation ID) and `published` (Schedule Event
+ID), empty content, and an `alt` description. Like deletion, a trusted consumption
+suppresses the root regardless of snapshot timestamps. It remains effective when
+the Schedule Event is replaced or removed; it does not require the old publication
+to remain retrievable. Revoking the consuming publisher removes that contribution's
+effect, consistent with other draft operations.
+
+Publication success requires anonymous readback of both writes. Errors retain the
+form and unsaved input; a failure after publishing may already have removed the
+draft for other admins. The signed Schedule Event and submitted fields are stored
+in browser local storage **before transmission**, scoped to publisher and root,
+so retries (including after reopening) recover the same signed occurrence rather
+than creating a new identifier. No secret keys are stored by this recovery flow.
+Recovery data is removed after verified completion. Changed fields are retained
+with a message to apply them by editing the recovered published occurrence.
+Damaged recovery data blocks new publication rather than guessing its outcome.
+If a newer draft revision appears while an older signed publication remains
+unobservable, reconciliation does not authorize retransmitting that older snapshot:
+publication stays blocked pending recovery/checking the original outcome.
+Consumed drafts are never automatically recreated. Concurrent admins can still
+publish duplicates; each publisher can delete their own duplicate.
+
+### Operation contract
+
+Each revision, dismissal, or consumption is a new kind `3523` record signed
 by its actual contributor, with the same topic/version and an `op` of `revise`,
 `delete`, or `consume`. An `e` tag with marker `root` references the exact signed
 creation event ID; revisions also reference the loaded base event with marker
@@ -176,7 +218,7 @@ reconciled first; the new input remains in the form and requires a separate Save
 draft click to create another proposal (for creations) or reconcile with the
 latest revision (for edits). Revision retries refresh state first; a different
 winning revision requires reconciliation rather than retransmission. Pending
-retries are scoped to the signing account and draft. Pending retries last for the mounted
+retries are scoped to the signing account and draft. Pending save/deletion retries last for the mounted
 workspace; after leaving it, refresh the shared list before recreating a proposal
 whose write outcome was uncertain.
 

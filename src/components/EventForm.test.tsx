@@ -7,6 +7,27 @@ import { draftCreationEvent, readSharedEventDrafts, StaleEventDraftError } from 
 import { finalizeEvent, generateSecretKey } from 'nostr-tools';
 
 describe('Event Draft form', () => {
+  it('validates before publishing and retains unsaved input after a failed publication', async () => {
+    const publish = vi.fn().mockRejectedValue(new Error('Signer declined'));
+    const success = vi.fn();
+    const fields = { ...createEventDraft('Europe/London'), title: 'Proposal', startDate: '2027-07-12', startTime: '', endDate: '', endTime: '' };
+    render(<TestApp><EventForm savedDraft={fields} onPublishDraft={publish} onSaveDraft={vi.fn()} onSuccess={success} /></TestApp>);
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled();
+    const submit = screen.getByRole('button', { name: 'Publish Event' });
+    fireEvent.submit(submit.closest('form')!);
+    await screen.findByText('Start date and time are required');
+    expect(publish).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Start Time/), { target: { value: '09:00' } });
+    fireEvent.change(screen.getByLabelText(/Title/), { target: { value: 'Unsaved title' } });
+    fireEvent.click(submit);
+    await screen.findByText(/Signer declined/);
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ title: 'Unsaved title', tzid: 'Europe/London' }));
+    expect(screen.getByLabelText(/Title/)).toHaveValue('Unsaved title');
+    expect(success).not.toHaveBeenCalled();
+    publish.mockResolvedValue(undefined);
+    fireEvent.click(submit);
+    await waitFor(() => expect(success).toHaveBeenCalledOnce());
+  });
   it('requires confirmation, cancels without deleting, and retains input after a failed deletion', async () => {
     const remove = vi.fn().mockRejectedValue(new Error('Acknowledgment timed out'));
     const success = vi.fn();
@@ -27,17 +48,18 @@ describe('Event Draft form', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirm deletion' }));
     await waitFor(() => expect(success).toHaveBeenCalledOnce());
   });
-  it('edits shared fields and retains unsaved input for reconciliation when loading the latest draft', async () => {
+  it.each(['Save draft', 'Publish Event'])('retains unsaved input for reconciliation after a stale %s', async (action) => {
     const fields = { ...createEventDraft('Europe/London'), title: 'Original', content: 'Original notes' };
     const record = finalizeEvent({ ...draftCreationEvent({ ...fields, title: 'Remote title' }), created_at: 1 }, generateSecretKey());
     const latest = readSharedEventDrafts([record], [record.pubkey])[0];
     const save = vi.fn().mockRejectedValue(new StaleEventDraftError(latest));
     const load = vi.fn();
-    render(<TestApp><EventForm savedDraft={fields} onSaveDraft={save} onLoadLatestDraft={load} /></TestApp>);
+    render(<TestApp><EventForm savedDraft={fields} onSaveDraft={save} onPublishDraft={save} onLoadLatestDraft={load} /></TestApp>);
     expect(screen.getByLabelText(/Title/)).toBeEnabled();
     fireEvent.change(screen.getByLabelText(/Title/), { target: { value: 'My unsaved title' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    fireEvent.click(screen.getByRole('button', { name: action }));
     await screen.findByRole('button', { name: 'Load latest draft' });
+    expect(screen.getByRole('button', { name: 'Publish Event' })).toBeDisabled();
     expect(screen.getByLabelText(/Title/)).toHaveValue('My unsaved title');
     fireEvent.click(screen.getByRole('button', { name: 'Load latest draft' }));
     expect(load).toHaveBeenCalledWith(latest);
