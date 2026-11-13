@@ -62,6 +62,8 @@ import { useAuthors } from '@/hooks/useAuthors';
 import { useAdminMutations } from '@/hooks/useAdminMutations';
 import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 import { useEventTemplates, type EventTemplate } from '@/hooks/useEventTemplates';
+import { useSharedEventDrafts } from '@/hooks/use-shared-event-drafts';
+import type { SharedEventDraft } from '@/lib/shared-event-drafts';
 import type { EventDraft } from '@/lib/event-authoring';
 import { SITE_OWNER_PUBKEY } from '@/lib/config';
 import { EventForm } from '@/components/EventForm';
@@ -237,6 +239,8 @@ function EventsTab() {
   const { user } = useCurrentUser();
   const [showForm, setShowForm] = useState(false);
   const [editingEvent, setEditingEvent] = useState<ScheduleEvent | undefined>(undefined);
+  const [openedDraft, setOpenedDraft] = useState<SharedEventDraft>();
+  const drafts = useSharedEventDrafts();
   const [showPast, setShowPast] = useState(false);
   const [templateToLoad, setTemplateToLoad] = useState<EventTemplate | undefined>(undefined);
 
@@ -247,6 +251,7 @@ function EventsTab() {
   const past = partition.past;
 
   function handleEdit(ev: ScheduleEvent) {
+    setOpenedDraft(undefined);
     setEditingEvent(ev);
     setTemplateToLoad(undefined);
     setShowForm(true);
@@ -254,6 +259,7 @@ function EventsTab() {
   }
 
   function handleFormSuccess() {
+    setOpenedDraft(undefined);
     setShowForm(false);
     setEditingEvent(undefined);
     setTemplateToLoad(undefined);
@@ -261,6 +267,7 @@ function EventsTab() {
   }
 
   function handleCancelForm() {
+    setOpenedDraft(undefined);
     setShowForm(false);
     setEditingEvent(undefined);
     setTemplateToLoad(undefined);
@@ -275,6 +282,8 @@ function EventsTab() {
   }
 
   function handleLoadTemplate(template: EventTemplate) {
+    setOpenedDraft(undefined);
+    setEditingEvent(undefined);
     setTemplateToLoad(template);
     setShowForm(true);
     window.scrollTo(0, 0);
@@ -286,6 +295,30 @@ function EventsTab() {
 
   return (
     <div className="space-y-6">
+      {!showForm && (
+        <section aria-label="Shared Event Drafts" className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-condensed text-sm font-bold uppercase tracking-widest text-muted-foreground">Shared drafts</h3>
+            <Button variant="ghost" size="sm" disabled={drafts.isFetching} onClick={() => void drafts.refreshDrafts()}>Refresh drafts</Button>
+          </div>
+          <p className="text-sm text-muted-foreground">Public proposals shared with all Trusted Admins. Saving a draft does not add it to the schedule.</p>
+          {drafts.isLoading && <Skeleton className="h-20 w-full rounded-lg" />}
+          {drafts.isError && <p role="alert" className="text-sm text-destructive">Could not load drafts. Check your relays and refresh.</p>}
+          {!drafts.isLoading && !drafts.isError && !drafts.data?.length && <p className="text-sm text-muted-foreground">No shared drafts yet. Create a new event and choose Save draft.</p>}
+          {drafts.data?.map((draft) => (
+            <div key={draft.id} className="flex items-center gap-3 rounded-lg border border-dashed bg-card p-4">
+              <Badge variant="outline">Draft</Badge>
+              <div className="min-w-0 flex-1">
+                <h4 className="font-condensed font-bold truncate">{draft.fields.title}</h4>
+                <p className="text-xs text-muted-foreground">Created by {genUserName(draft.creator)}</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => {
+                setOpenedDraft(draft); setEditingEvent(undefined); setTemplateToLoad(undefined); setShowForm(true); window.scrollTo(0, 0);
+              }}>Open draft</Button>
+            </div>
+          ))}
+        </section>
+      )}
       {/* Templates section - show when not editing */}
       {!showForm && !templatesLoading && templates.length > 0 && (
         <div>
@@ -328,19 +361,27 @@ function EventsTab() {
         <div className="rounded-lg border border-primary/30 bg-card p-5">
           <h2 className="font-condensed text-lg font-bold uppercase tracking-wide text-foreground mb-4 flex items-center gap-2">
             <CalendarPlus className="w-4 h-4 text-primary" />
-            {editingEvent ? 'Edit Event' : templateToLoad ? 'New Event (from template)' : 'New Event'}
+            {openedDraft ? 'Draft' : editingEvent ? 'Edit Event' : templateToLoad ? 'New Event (from template)' : 'New Event'}
           </h2>
-          <EventForm
+          {openedDraft && !drafts.data?.some((draft) => draft.id === openedDraft.id) ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">This draft is no longer available from the current Trusted Admins.</p>
+              <Button variant="outline" onClick={handleCancelForm}>Close draft</Button>
+            </div>
+          ) : <EventForm
+            key={openedDraft?.id ?? editingEvent?.event.id ?? 'new'}
+            savedDraft={openedDraft?.fields}
+            onSaveDraft={drafts.saveDraft}
             existing={editingEvent}
             templateToLoad={templateToLoad}
             onSuccess={handleFormSuccess}
             onCancel={handleCancelForm}
             onSaveTemplate={handleSaveTemplate}
-          />
+          />}
         </div>
       ) : (
         <Button
-          onClick={() => { setEditingEvent(undefined); setTemplateToLoad(undefined); setShowForm(true); window.scrollTo(0, 0); }}
+          onClick={() => { setOpenedDraft(undefined); setEditingEvent(undefined); setTemplateToLoad(undefined); setShowForm(true); window.scrollTo(0, 0); }}
           className="font-condensed font-bold uppercase tracking-wide bg-primary text-primary-foreground hover:bg-primary/90"
         >
           <CalendarPlus className="w-4 h-4 mr-2" />

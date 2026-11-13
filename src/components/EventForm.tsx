@@ -40,9 +40,11 @@ interface EventFormProps {
   onSuccess?: () => void;
   onCancel?: () => void;
   onSaveTemplate?: (name: string, draft: EventDraft) => void;
+  onSaveDraft?: (draft: EventDraft) => Promise<void>;
+  savedDraft?: EventDraft;
 }
 
-export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate }: EventFormProps) {
+export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveDraft, savedDraft }: EventFormProps) {
   const { publishDraft, isPending } = useEventAuthoring();
   const { mutateAsync: uploadFile, isPending: isUploading } = useUploadFile();
   const { user } = useCurrentUser();
@@ -52,7 +54,12 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const defaultTz = US_TIMEZONES.some(tz => tz.value === browserTz) ? browserTz : 'America/Chicago';
 
-  const [form, setForm] = useState<EventDraft>(() => createEventDraft(defaultTz));
+  const [form, setForm] = useState<EventDraft>(() => savedDraft ?? createEventDraft(defaultTz));
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+
+  useEffect(() => {
+    if (savedDraft) setForm({ ...savedDraft, links: [...savedDraft.links] });
+  }, [savedDraft]);
 
   useEffect(() => {
     if (!existing) return;
@@ -158,6 +165,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (savedDraft || isSavingDraft) return;
     try {
       await publishDraft(form, existing);
       toast({
@@ -177,8 +185,28 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
     }
   }
 
+  async function handleSaveDraft() {
+    if (!onSaveDraft || isSavingDraft) return;
+    if (!form.title.trim()) {
+      toast({ title: 'Title is required', variant: 'destructive' });
+      return;
+    }
+    setIsSavingDraft(true);
+    try {
+      await onSaveDraft(form);
+      toast({ title: 'Draft saved', description: 'Available to all Trusted Admins.' });
+      onSuccess?.();
+    } catch (error) {
+      console.error('Failed to save draft:', error);
+      toast({ title: 'Could not save draft', description: error instanceof Error ? error.message : 'Check your relays and try again.', variant: 'destructive' });
+    } finally {
+      setIsSavingDraft(false);
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
+      <fieldset disabled={Boolean(savedDraft) || isSavingDraft || isPending} className="space-y-5">
       <div className="space-y-1.5">
         <Label htmlFor="ev-title" className="font-condensed font-600 uppercase text-xs tracking-wide">
           Title <span className="text-primary">*</span>
@@ -268,11 +296,14 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
         <Label htmlFor="ev-tzid" className="font-condensed font-600 uppercase text-xs tracking-wide">
           Timezone
         </Label>
-        <Select value={form.tzid} onValueChange={(value) => setField('tzid', value)}>
+        <Select value={form.tzid} onValueChange={(value) => { if (value) setField('tzid', value); }} disabled={Boolean(savedDraft) || isSavingDraft || isPending}>
           <SelectTrigger id="ev-tzid">
-            <SelectValue />
+            <SelectValue>{US_TIMEZONES.find((tz) => tz.value === form.tzid)?.label ?? form.tzid}</SelectValue>
           </SelectTrigger>
           <SelectContent>
+            {form.tzid && !US_TIMEZONES.some((tz) => tz.value === form.tzid) && (
+              <SelectItem value={form.tzid}>{form.tzid}</SelectItem>
+            )}
             {US_TIMEZONES.map((tz) => (
               <SelectItem key={tz.value} value={tz.value}>
                 {tz.label}
@@ -423,30 +454,39 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
         </Button>
       </div>
 
+      </fieldset>
       <div className="flex flex-wrap gap-3 pt-2">
-        <Button
+        {!existing && !savedDraft && onSaveDraft && (
+          <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={isSavingDraft || isUploading || isPending}>
+            {isSavingDraft && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            Save draft
+          </Button>
+        )}
+        {!savedDraft && <Button
           type="submit"
-          disabled={isPending}
+          disabled={isPending || isSavingDraft}
           className="font-condensed font-bold uppercase tracking-wide bg-primary text-primary-foreground hover:bg-primary/90"
         >
           {isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
           {existing ? 'Update Event' : 'Publish Event'}
-        </Button>
+        </Button>}
         {onCancel && (
           <Button
             type="button"
             variant="outline"
             onClick={onCancel}
+            disabled={isSavingDraft || isPending}
             className="font-condensed font-bold uppercase tracking-wide"
           >
-            Cancel
+            {savedDraft ? 'Close draft' : 'Cancel'}
           </Button>
         )}
-        {onSaveTemplate && (
+        {!savedDraft && onSaveTemplate && (
           <Button
             type="button"
             variant="outline"
             onClick={handleSaveTemplate}
+            disabled={isSavingDraft || isPending}
             className="font-condensed font-bold uppercase tracking-wide"
           >
             <Save className="w-4 h-4 mr-2" />
