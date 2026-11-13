@@ -16,8 +16,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Loader2, Plus, X, Save, Upload, Calendar } from 'lucide-react';
-import type { ScheduleEvent } from '@/lib/schedule-event';
-import { StaleEventDraftError, type SharedEventDraft } from '@/lib/shared-event-drafts';
+import { formatScheduleEventDate, formatScheduleEventTime, parseScheduleEvent, type ScheduleEvent } from '@/lib/schedule-event';
+import { PendingDraftPublicationError, StaleEventDraftError, type SharedEventDraft } from '@/lib/shared-event-drafts';
 import {
   createEventDraft,
   draftFromScheduleEvent,
@@ -48,9 +48,10 @@ interface EventFormProps {
   onLoadLatestDraft?: (draft: SharedEventDraft) => void;
   onDeleteDraft?: () => Promise<void>;
   onPublishDraft?: (draft: EventDraft) => Promise<void>;
+  onRecoverPublication?: (draft: EventDraft) => Promise<void>;
 }
 
-export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveDraft, savedDraft, onLoadLatestDraft, onDeleteDraft, onPublishDraft }: EventFormProps) {
+export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveDraft, savedDraft, onLoadLatestDraft, onDeleteDraft, onPublishDraft, onRecoverPublication }: EventFormProps) {
   const { publishDraft, isPending: isAuthoring } = useEventAuthoring();
   const { mutateAsync: uploadFile, isPending: isUploading } = useUploadFile();
   const { user } = useCurrentUser();
@@ -64,6 +65,8 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isPublishingDraft, setIsPublishingDraft] = useState(false);
   const [publishError, setPublishError] = useState<string>();
+  const [recoveryMessage, setRecoveryMessage] = useState<string>();
+  const [pendingPublication, setPendingPublication] = useState<ScheduleEvent | null>(null);
   const isPending = isAuthoring || isPublishingDraft;
   const [isDeletingDraft, setIsDeletingDraft] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -182,6 +185,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
     if (isSavingDraft || isDeletingDraft || isPending || isUploading || latestDraft || (savedDraft && !onPublishDraft)) return;
     setIsPublishingDraft(true);
     setPublishError(undefined);
+    setRecoveryMessage(undefined);
     try {
       if (savedDraft && onPublishDraft) {
         const result = eventFromDraft(form, 'validation');
@@ -198,6 +202,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
     } catch (error) {
       console.error('Failed to publish event:', error);
       if (error instanceof StaleEventDraftError) setLatestDraft(error.latest);
+      if (error instanceof PendingDraftPublicationError) setPendingPublication(parseScheduleEvent(error.publication));
       const message = error instanceof Error ? error.message : 'There was an error publishing this event to Nostr.';
       setPublishError(message);
       toast({
@@ -207,6 +212,25 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
           : message,
         variant: 'destructive',
       });
+    } finally {
+      setIsPublishingDraft(false);
+    }
+  }
+
+  async function handleRecoverPublication() {
+    if (!onRecoverPublication || isPending || isSavingDraft || isDeletingDraft) return;
+    setIsPublishingDraft(true);
+    try {
+      await onRecoverPublication(form);
+      setPendingPublication(null);
+      setPublishError(undefined);
+      setRecoveryMessage('Original signed event recovered. Your current fields are retained below; edit the published event to apply newer changes.');
+      toast({ title: 'Original publication recovered' });
+    } catch (error) {
+      console.error('Failed to recover publication:', error);
+      const message = error instanceof Error ? error.message : 'Could not recover the original publication.';
+      setPublishError(message);
+      toast({ title: 'Recovery failed', description: message, variant: 'destructive' });
     } finally {
       setIsPublishingDraft(false);
     }
@@ -256,7 +280,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
     <form onSubmit={handleSubmit} className="space-y-5">
       {latestDraft && <div role="alert" className="space-y-3 rounded-lg border border-primary/30 p-4">
         <p className="text-sm">This draft has changed. Load the latest draft before saving or publishing. A copy of your unsaved fields will remain below for reconciliation.</p>
-        <Button type="button" variant="outline" disabled={isSavingDraft} onClick={() => {
+        <Button type="button" variant="outline" disabled={isSavingDraft || isPending || isDeletingDraft} onClick={() => {
           setUnsavedCopies((copies) => [...copies, { ...form, links: [...form.links] }]);
           setForm({ ...latestDraft.fields, links: [...latestDraft.fields.links] });
           onLoadLatestDraft?.(latestDraft);
@@ -517,9 +541,15 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
       </div>
 
       </fieldset>
+      {recoveryMessage && <p role="status" className="text-sm">{recoveryMessage}</p>}
       {publishError && <div role="alert" className="space-y-2 text-sm text-destructive">
         <p>{publishError}</p>
         {savedDraft && <p>Your input is retained. Check your signer and relays, then retry Publish Event. If a publication was already signed, retrying recovers that same Schedule Event; it may already be visible to other admins.</p>}
+      </div>}
+      {pendingPublication && onRecoverPublication && <div className="space-y-3 rounded-lg border p-4">
+        <p className="text-sm">Recover the original signed event: <strong>{pendingPublication.title}</strong> · {formatScheduleEventDate(pendingPublication)} · {formatScheduleEventTime(pendingPublication)}.</p>
+        <p className="text-sm text-muted-foreground">This resends the earlier signed fields and consumes the draft. Your current edits stay in this form so you can apply them to the published event afterward.</p>
+        <Button type="button" variant="outline" disabled={isPending || isSavingDraft || isDeletingDraft} onClick={handleRecoverPublication}>Recover original publication</Button>
       </div>}
       <div className="flex flex-wrap gap-3 pt-2">
         {!existing && onSaveDraft && (

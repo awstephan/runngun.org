@@ -373,6 +373,7 @@ function EventsTab() {
             onLoadLatestDraft={setOpenedDraft}
             onDeleteDraft={openedDraft ? () => drafts.deleteDraft(openedDraft) : undefined}
             onPublishDraft={openedDraft ? (fields) => drafts.publishDraft(fields, openedDraft) : undefined}
+            onRecoverPublication={openedDraft ? (fields) => drafts.recoverPublication(fields, openedDraft) : undefined}
             existing={editingEvent}
             templateToLoad={templateToLoad}
             onSuccess={handleFormSuccess}

@@ -176,7 +176,12 @@ with a message to apply them by editing the recovered published occurrence.
 Damaged recovery data blocks new publication rather than guessing its outcome.
 If a newer draft revision appears while an older signed publication remains
 unobservable, reconciliation does not authorize retransmitting that older snapshot:
-publication stays blocked pending recovery/checking the original outcome.
+normal publication stays blocked. An explicit **Recover original publication**
+action displays the earlier signed title and schedule, then resends that exact
+event after rechecking authority and consumption. This recovery can proceed past
+a newer draft revision, but never signs a new Schedule Event or bypasses another
+publication/deletion. It retains the current form fields even on success so newer
+changes can be applied by editing the published occurrence.
 Consumed drafts are never automatically recreated. Concurrent admins can still
 publish duplicates; each publisher can delete their own duplicate.
 

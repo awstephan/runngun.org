@@ -2,11 +2,30 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TestApp } from '@/test/TestApp';
 import { EventForm } from '@/components/EventForm';
-import { createEventDraft } from '@/lib/event-authoring';
-import { draftCreationEvent, readSharedEventDrafts, StaleEventDraftError } from '@/lib/shared-event-drafts';
+import { createEventDraft, eventFromDraft } from '@/lib/event-authoring';
+import { draftCreationEvent, PendingDraftPublicationError, readSharedEventDrafts, StaleEventDraftError } from '@/lib/shared-event-drafts';
 import { finalizeEvent, generateSecretKey } from 'nostr-tools';
 
 describe('Event Draft form', () => {
+  it('explicitly recovers the original signed publication without discarding newer form input', async () => {
+    const fields = { ...createEventDraft('Europe/London'), title: 'Original proposal' };
+    const result = eventFromDraft(fields, 'recovery');
+    if (!result.ok) throw new Error(result.message);
+    const signed = finalizeEvent({ ...result.event, created_at: 1 }, generateSecretKey());
+    const publish = vi.fn().mockRejectedValue(new PendingDraftPublicationError(signed, 'Publication outcome is uncertain'));
+    const recover = vi.fn().mockResolvedValue(undefined);
+    const success = vi.fn();
+    render(<TestApp><EventForm savedDraft={fields} onPublishDraft={publish} onRecoverPublication={recover} onSuccess={success} /></TestApp>);
+    fireEvent.click(screen.getByRole('button', { name: 'Publish Event' }));
+    const recovery = await screen.findByRole('button', { name: 'Recover original publication' });
+    fireEvent.change(screen.getByLabelText(/Title/), { target: { value: 'Newer input' } });
+    fireEvent.change(screen.getByLabelText(/Start Time/), { target: { value: '' } });
+    fireEvent.click(recovery);
+    await screen.findByText(/Original signed event recovered/);
+    expect(recover).toHaveBeenCalledWith(expect.objectContaining({ title: 'Newer input', startTime: '' }));
+    expect(screen.getByLabelText(/Title/)).toHaveValue('Newer input');
+    expect(success).not.toHaveBeenCalled();
+  });
   it('validates before publishing and retains unsaved input after a failed publication', async () => {
     const publish = vi.fn().mockRejectedValue(new Error('Signer declined'));
     const success = vi.fn();

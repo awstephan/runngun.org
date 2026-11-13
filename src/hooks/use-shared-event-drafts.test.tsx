@@ -75,7 +75,7 @@ beforeEach(() => {
 });
 
 describe('shared Event Draft persistence', () => {
-  it('does not retransmit an uncertain older publication after reconciling a newer draft revision', async () => {
+  it('requires explicit recovery of an uncertain older publication after reconciling a newer draft revision', async () => {
     network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
     network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
     const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
@@ -90,6 +90,11 @@ describe('shared Event Draft persistence', () => {
     const latest = hook.result.current.data![0];
     await act(async () => { await expect(hook.result.current.publishDraft(scheduled, latest)).rejects.toThrow('older revision'); });
     expect(network.attempts).toHaveLength(1);
+    const original = network.attempts[0];
+    await act(async () => { await hook.result.current.recoverPublication({ ...scheduled, title: 'Reconciled fields' }, latest); });
+    expect(network.events.filter((event) => event.kind === 31923).map((event) => event.id)).toEqual([original.id]);
+    await waitFor(() => expect(hook.result.current.data).toEqual([]));
+    await act(async () => { await expect(hook.result.current.recoverPublication(scheduled, latest)).rejects.toThrow('No pending publication'); });
   });
   it.each([
     { ...scheduled, title: '' },

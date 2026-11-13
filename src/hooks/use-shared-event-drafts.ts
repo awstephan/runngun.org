@@ -10,14 +10,14 @@ import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 import { eventFromDraft, type EventDraft } from '@/lib/event-authoring';
 import { InvalidEventDraftError } from '@/hooks/useEventAuthoring';
 import { SCHEDULE_EVENT_KIND, SCHEDULE_EVENT_TOPIC } from '@/lib/schedule-event';
-import { draftConsumptionEvent, draftCreationEvent, draftDeletionEvent, draftPublications, draftRevisionEvent, EVENT_DRAFT_KIND, EVENT_DRAFT_TOPIC, readSharedEventDrafts, StaleEventDraftError, type SharedEventDraft } from '@/lib/shared-event-drafts';
+import { draftConsumptionEvent, draftCreationEvent, draftDeletionEvent, draftPublications, draftRevisionEvent, EVENT_DRAFT_KIND, EVENT_DRAFT_TOPIC, PendingDraftPublicationError, readSharedEventDrafts, StaleEventDraftError, type SharedEventDraft } from '@/lib/shared-event-drafts';
 
 const PUBLICATION_STORAGE_PREFIX = 'runngun:pending-draft-publication:v1:';
 interface PendingDraftAction { event: NostrEvent; fields: string }
 
 function restorePublication(scope: string, pubkey: string, root: string): PendingDraftAction | undefined {
   const raw = localStorage.getItem(PUBLICATION_STORAGE_PREFIX + scope);
-  if (!raw) return;
+  if (raw === null) return;
   try {
     const record = JSON.parse(raw) as Partial<PendingDraftAction> | null;
     if (record?.event && typeof record.fields === 'string' &&
@@ -36,6 +36,7 @@ async function verifyPublicDraft(event: NostrEvent, urls: string[], retryAction 
     try {
       const events = await relay.query([{
         kinds: [event.kind], authors: [event.pubkey], ids: [event.id],
+        '#t': [event.kind === SCHEDULE_EVENT_KIND ? SCHEDULE_EVENT_TOPIC : EVENT_DRAFT_TOPIC],
       }], { signal: AbortSignal.timeout(8_000) });
       if (!events.some((record) => record.id === event.id && verifyEvent({ ...record }))) {
         throw new Error('Draft not returned anonymously');
@@ -128,7 +129,7 @@ export function useSharedEventDrafts() {
     onError: (error) => console.error('Failed to save shared Event Draft:', error),
   });
   const publishing = useMutation({
-    mutationFn: async ({ fields, base }: { fields: EventDraft; base: SharedEventDraft }) => {
+    mutationFn: async ({ fields, base, recover = false }: { fields: EventDraft; base: SharedEventDraft; recover?: boolean }) => {
       const current = (await trustedAdmin.refetch()).data?.trustedAdmins ?? [];
       if (!user || !current.includes(user.pubkey)) throw new Error('Only a current Trusted Admin can publish an Event Draft.');
       const urls = config.relayMetadata.relays.filter((relay) => relay.read && relay.write).map((relay) => relay.url);
@@ -139,15 +140,16 @@ export function useSharedEventDrafts() {
       ], { signal: AbortSignal.timeout(10_000) });
       const scope = `${user.pubkey}:${base.id}:publish`;
       const prior = pending.current.get(scope) ?? restorePublication(scope, user.pubkey, base.id);
+      if (recover && !prior) throw new Error('No pending publication is available to recover. Refresh the schedule.');
       if (prior) pending.current.set(scope, prior);
       const visible = draftPublications(events, current).find((event) => event.id === prior?.event.id);
       const latest = readSharedEventDrafts(events, current).find((draft) => draft.id === base.id);
       if (!visible) {
         if (!latest) throw new Error('This draft is already consumed or no longer available. Your input is retained.');
-        if (latest.event.id !== base.event.id) throw new StaleEventDraftError(latest);
+        if (!recover && latest.event.id !== base.event.id) throw new StaleEventDraftError(latest);
         const signedBase = prior?.event.tags.find((tag) => tag[0] === 'e' && tag[3] === 'previous')?.[1];
-        if (prior && signedBase !== latest.event.id) {
-          throw new Error('An uncertain publication was signed from an older revision. Check the published schedule and recover that publication before publishing newer changes. Your input is retained.');
+        if (!recover && prior && signedBase !== latest.event.id) {
+          throw new PendingDraftPublicationError(prior.event, 'An uncertain publication was signed from an older revision. Recover the original signed publication before editing the published event. Your input is retained.');
         }
       }
       if (prior) {
@@ -176,7 +178,7 @@ export function useSharedEventDrafts() {
       pending.current.delete(consumptionScope);
       await queryClient.invalidateQueries({ queryKey: ['shared-event-drafts'] });
       await queryClient.invalidateQueries({ queryKey: ['schedule-events'] });
-      if (saved.fields !== JSON.stringify(fields)) throw new Error('The previously signed Schedule Event is now published. Your newer input is retained; edit the published event to apply it.');
+      if (!recover && saved.fields !== JSON.stringify(fields)) throw new Error('The previously signed Schedule Event is now published. Your newer input is retained; edit the published event to apply it.');
     },
     onError: (error) => console.error('Failed to publish shared Event Draft:', error),
   });
@@ -213,6 +215,17 @@ export function useSharedEventDrafts() {
     await queryClient.invalidateQueries({ queryKey: ['shared-event-drafts'] });
   };
   const saveDraft = (fields: EventDraft, base?: SharedEventDraft): Promise<void> => save.mutateAsync({ fields, base });
-  const publishDraft = (fields: EventDraft, base: SharedEventDraft): Promise<void> => publishing.mutateAsync({ fields, base });
-  return { ...query, data: isTrusted ? query.data : undefined, saveDraft, publishDraft, isPublishing: publishing.isPending, isSaving: save.isPending, deleteDraft: deletion.mutateAsync, isDeleting: deletion.isPending, refreshDrafts };
+  const publishDraft = async (fields: EventDraft, base: SharedEventDraft): Promise<void> => {
+    try {
+      await publishing.mutateAsync({ fields, base });
+    } catch (error) {
+      const prior = pending.current.get(`${user?.pubkey}:${base.id}:publish`);
+      if (prior && !(error instanceof StaleEventDraftError)) {
+        throw new PendingDraftPublicationError(prior.event, error instanceof Error ? error.message : 'Publication outcome is uncertain.');
+      }
+      throw error;
+    }
+  };
+  const recoverPublication = (fields: EventDraft, base: SharedEventDraft): Promise<void> => publishing.mutateAsync({ fields, base, recover: true });
+  return { ...query, data: isTrusted ? query.data : undefined, saveDraft, publishDraft, recoverPublication, isPublishing: publishing.isPending, isSaving: save.isPending, deleteDraft: deletion.mutateAsync, isDeleting: deletion.isPending, refreshDrafts };
 }

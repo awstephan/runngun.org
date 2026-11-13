@@ -62,12 +62,12 @@ export function readSharedEventDrafts(events: NostrEvent[], trustedAdmins: reado
     seen.add(event.id);
     return true;
   });
-  const deleted = new Set(records.filter((event) => event.tags.some(([tag, value]) => tag === 'op' && ['delete', 'consume'].includes(value)))
+  const suppressedRoots = new Set(records.filter((event) => event.tags.some(([tag, value]) => tag === 'op' && ['delete', 'consume'].includes(value)))
     .map((event) => event.tags.find((tag) => tag[0] === 'e' && tag[3] === 'root')![1]));
   for (const event of draftPublications(events, trustedAdmins)) {
-    deleted.add(event.tags.find((tag) => tag[0] === 'e' && tag[3] === 'root')![1]);
+    suppressedRoots.add(event.tags.find((tag) => tag[0] === 'e' && tag[3] === 'root')![1]);
   }
-  const roots = records.filter((event) => !deleted.has(event.id) && event.tags.some(([tag, value]) => tag === 'op' && value === 'create'));
+  const roots = records.filter((event) => !suppressedRoots.has(event.id) && event.tags.some(([tag, value]) => tag === 'op' && value === 'create'));
   return roots.map((root) => {
     const event = [root, ...records.filter((record) => record.tags.some((tag) => tag[0] === 'e' && tag[1] === root.id && tag[3] === 'root'))]
       .sort((a, b) => b.created_at - a.created_at || a.id.localeCompare(b.id))[0];
@@ -132,5 +132,11 @@ export function draftConsumptionEvent(draft: SharedEventDraft, published: NostrE
 export class StaleEventDraftError extends Error {
   constructor(public readonly latest: SharedEventDraft) {
     super('This draft has changed. Load the latest draft and reconcile your unsaved fields before saving.');
+  }
+}
+
+export class PendingDraftPublicationError extends Error {
+  constructor(public readonly publication: NostrEvent, message: string) {
+    super(message);
   }
 }
