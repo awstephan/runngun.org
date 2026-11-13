@@ -1,12 +1,14 @@
 import { useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NRelay1, type NostrEvent } from '@nostrify/nostrify';
+import { useNostr } from '@nostrify/react';
+import { verifyEvent } from 'nostr-tools';
 import { useAppContext } from '@/hooks/useAppContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useTrustedAdmin } from '@/hooks/useTrustedAdmin';
 import type { EventDraft } from '@/lib/event-authoring';
-import { draftCreationEvent, EVENT_DRAFT_KIND, EVENT_DRAFT_TOPIC, readSharedEventDrafts } from '@/lib/shared-event-drafts';
+import { draftCreationEvent, draftRevisionEvent, EVENT_DRAFT_KIND, EVENT_DRAFT_TOPIC, readSharedEventDrafts, StaleEventDraftError, type SharedEventDraft } from '@/lib/shared-event-drafts';
 
 /** A separate connection deliberately has no signer or NIP-42 authentication. */
 async function verifyPublicDraft(event: NostrEvent, urls: string[]): Promise<void> {
@@ -16,7 +18,7 @@ async function verifyPublicDraft(event: NostrEvent, urls: string[]): Promise<voi
       const events = await relay.query([{
         kinds: [EVENT_DRAFT_KIND], authors: [event.pubkey], '#t': [EVENT_DRAFT_TOPIC], ids: [event.id],
       }], { signal: AbortSignal.timeout(8_000) });
-      if (!readSharedEventDrafts(events, [event.pubkey]).some((draft) => draft.id === event.id)) {
+      if (!events.some((record) => record.id === event.id && verifyEvent({ ...record }))) {
         throw new Error('Draft not returned anonymously');
       }
     } finally {
@@ -29,14 +31,16 @@ async function verifyPublicDraft(event: NostrEvent, urls: string[]): Promise<voi
 }
 
 export function useSharedEventDrafts() {
+  const { nostr } = useNostr();
   const trustedAdmin = useTrustedAdmin({ refetchInterval: 30_000 });
   const { user } = useCurrentUser();
   const { config } = useAppContext();
   const queryClient = useQueryClient();
-  const pending = useRef<{ event: NostrEvent; fields: string }>();
+  const pending = useRef(new Map<string, { event: NostrEvent; fields: string }>());
   const submittedFields = useRef('');
+  const submittedScope = useRef('new');
   const publication = useNostrPublish({
-    onSigned: (event) => { pending.current = { event, fields: submittedFields.current }; },
+    onSigned: (event) => { pending.current.set(submittedScope.current, { event, fields: submittedFields.current }); },
   });
   const authority = trustedAdmin.authority;
   const isTrusted = trustedAdmin.accessFor(user?.pubkey).status === 'trusted-admin';
@@ -54,25 +58,44 @@ export function useSharedEventDrafts() {
     refetchInterval: 30_000,
   });
   const save = useMutation({
-    mutationFn: async (fields: EventDraft) => {
+    mutationFn: async ({ fields, base }: { fields: EventDraft; base?: SharedEventDraft }) => {
       const current = (await trustedAdmin.refetch()).data?.trustedAdmins ?? [];
       if (!user || !current.includes(user.pubkey)) throw new Error('Only a current Trusted Admin can save an Event Draft.');
       const urls = config.relayMetadata.relays.filter((relay) => relay.read && relay.write).map((relay) => relay.url);
       if (!urls.length) throw new Error('Enable a public relay for both reading and writing in Relay settings.');
       const serialized = JSON.stringify(fields);
-      if (pending.current?.event.pubkey !== user.pubkey) pending.current = undefined;
-      const changed = pending.current && pending.current.fields !== serialized;
-      if (pending.current) {
-        await publication.republish(pending.current.event);
+      const scope = `${user.pubkey}:${base?.id ?? 'new'}`;
+      const prior = pending.current.get(scope);
+      const changed = prior && prior.fields !== serialized;
+      if (base) {
+        const events = await nostr.query([
+          { kinds: [EVENT_DRAFT_KIND], authors: current, ids: [base.id] },
+          { kinds: [EVENT_DRAFT_KIND], authors: current, '#t': [EVENT_DRAFT_TOPIC], '#e': [base.id], limit: 1000 },
+        ], { signal: AbortSignal.timeout(10_000) });
+        const latest = readSharedEventDrafts(events, current).find((draft) => draft.id === base.id);
+        if (!latest) throw new Error('This draft is no longer available from the current Trusted Admins. Your input is retained.');
+        const pendingBase = prior?.event.tags.find((tag) => tag[0] === 'e' && tag[3] === 'previous')?.[1];
+        const reopenedDifferentBase = prior && pendingBase !== base.event.id && prior.event.id !== base.event.id;
+        if (reopenedDifferentBase || (latest.event.id !== base.event.id && latest.event.id !== prior?.event.id)) {
+          pending.current.delete(scope);
+          throw new StaleEventDraftError(latest);
+        }
+      }
+      if (prior) {
+        await publication.republish(prior.event);
       } else {
         submittedFields.current = serialized;
-        await publication.mutateAsync(draftCreationEvent(fields));
+        submittedScope.current = scope;
+        await publication.mutateAsync(base ? draftRevisionEvent(fields, base) : draftCreationEvent(fields));
       }
-      if (!pending.current) throw new Error('The signer did not return a draft record. Retry Save draft.');
-      await verifyPublicDraft(pending.current.event, urls);
-      pending.current = undefined;
+      const saved = pending.current.get(scope);
+      if (!saved) throw new Error('The signer did not return a draft record. Retry Save draft.');
+      await verifyPublicDraft(saved.event, urls);
+      pending.current.delete(scope);
       await queryClient.invalidateQueries({ queryKey: ['shared-event-drafts'] });
-      if (changed) throw new Error('Previous draft is now saved. Your current fields are retained; choose Save draft again to create another proposal.');
+      if (changed) throw new Error(base
+        ? 'Previous revision is now saved. Your current fields are retained; choose Save draft again to load the latest revision before reconciling.'
+        : 'Previous draft is now saved. Your current fields are retained; choose Save draft again to create another proposal.');
     },
     onError: (error) => console.error('Failed to save shared Event Draft:', error),
   });
@@ -80,5 +103,6 @@ export function useSharedEventDrafts() {
     await trustedAdmin.refetch();
     await queryClient.invalidateQueries({ queryKey: ['shared-event-drafts'] });
   };
-  return { ...query, data: isTrusted ? query.data : undefined, saveDraft: save.mutateAsync, isSaving: save.isPending, refreshDrafts };
+  const saveDraft = (fields: EventDraft, base?: SharedEventDraft): Promise<void> => save.mutateAsync({ fields, base });
+  return { ...query, data: isTrusted ? query.data : undefined, saveDraft, isSaving: save.isPending, refreshDrafts };
 }

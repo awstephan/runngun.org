@@ -6,7 +6,7 @@ import { NLogin } from '@nostrify/react/login';
 import { TestApp } from '@/test/TestApp';
 import { useSharedEventDrafts } from '@/hooks/use-shared-event-drafts';
 import { createEventDraft } from '@/lib/event-authoring';
-import { draftCreationEvent } from '@/lib/shared-event-drafts';
+import { draftCreationEvent, draftRevisionEvent, StaleEventDraftError } from '@/lib/shared-event-drafts';
 import { ADMIN_LIST_DTAG, SITE_OWNER_PUBKEY } from '@/lib/config';
 
 const network = vi.hoisted(() => ({
@@ -62,6 +62,17 @@ beforeEach(() => {
 });
 
 describe('shared Event Draft persistence', () => {
+  it('lets another admin save a revision and refuses a stale overwrite', async () => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    await act(async () => { await hook.result.current.saveDraft({ ...fields, title: 'Bob revision' }, base); });
+    await waitFor(() => expect(hook.result.current.data?.[0]).toMatchObject({ id: base.id, creator: alicePubkey, event: { pubkey: bobPubkey }, fields: { title: 'Bob revision', tzid: 'Europe/London' } }));
+    await act(async () => { await expect(hook.result.current.saveDraft({ ...fields, title: 'Stale input' }, base)).rejects.toBeInstanceOf(StaleEventDraftError); });
+    expect(hook.result.current.data?.[0].fields.title).toBe('Bob revision');
+  });
   it('saves a title-only draft and reopens it in another account and session', async () => {
     const first = renderHook(useSharedEventDrafts, { wrapper: TestApp });
     await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
@@ -72,6 +83,47 @@ describe('shared Event Draft persistence', () => {
     await waitFor(() => expect(second.result.current.data).toHaveLength(1));
     expect(second.result.current.data?.[0]).toMatchObject({ creator: alicePubkey, fields });
     expect(network.writes).toBe(1);
+  });
+
+  it('recovers an ambiguous revision write and detects a later remote revision before saving', async () => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    network.failWrite = true;
+    await act(async () => { await expect(hook.result.current.saveDraft({ ...fields, title: 'Recovered' }, base)).rejects.toThrow('timed out'); });
+    network.failWrite = false;
+    await act(async () => { await hook.result.current.saveDraft({ ...fields, title: 'Recovered' }, base); });
+    await waitFor(() => expect(hook.result.current.data?.[0].fields.title).toBe('Recovered'));
+    const recovered = hook.result.current.data![0];
+    network.events.push(finalizeEvent(draftRevisionEvent({ ...fields, title: 'Remote edit' }, recovered), alice));
+    await act(async () => { await expect(hook.result.current.saveDraft({ ...fields, title: 'Local edit' }, recovered)).rejects.toMatchObject({ latest: { fields: { title: 'Remote edit' } } }); });
+    hook.unmount();
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(alice))];
+    const reopened = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(reopened.result.current.data?.[0].fields.title).toBe('Remote edit'));
+    expect(reopened.result.current.data).toHaveLength(1);
+  });
+
+  it.each([false, true])('requires reconciliation with a pending save when a remote revision arrives (reopened: %s)', async (reopen) => {
+    network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
+    network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    const base = hook.result.current.data![0];
+    network.publicRead = false;
+    await act(async () => { await expect(hook.result.current.saveDraft({ ...fields, title: 'Pending edit' }, base)).rejects.toThrow('public access'); });
+    network.publicRead = true;
+    const remote = finalizeEvent({ ...draftRevisionEvent({ ...fields, title: 'Remote edit' }, base), created_at: Math.floor(Date.now() / 1000) + 2 }, alice);
+    network.events.push(remote);
+    await act(async () => { await hook.result.current.refreshDrafts(); });
+    await waitFor(() => expect(hook.result.current.data?.[0].fields.title).toBe('Remote edit'));
+    const reopened = hook.result.current.data![0];
+    await act(async () => { await expect(hook.result.current.saveDraft({ ...fields, title: 'Reconciled input' }, reopen ? reopened : base)).rejects.toBeInstanceOf(StaleEventDraftError); });
+    expect(network.writes).toBe(1);
+    await act(async () => { await hook.result.current.saveDraft({ ...fields, title: 'Reconciled input' }, reopened); });
+    await waitFor(() => expect(hook.result.current.data?.[0].fields.title).toBe('Reconciled input'));
   });
 
   it('excludes untrusted creations and hides drafts when their creator is revoked', async () => {

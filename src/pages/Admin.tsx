@@ -363,21 +363,20 @@ function EventsTab() {
             <CalendarPlus className="w-4 h-4 text-primary" />
             {openedDraft ? 'Draft' : editingEvent ? 'Edit Event' : templateToLoad ? 'New Event (from template)' : 'New Event'}
           </h2>
-          {openedDraft && !drafts.data?.some((draft) => draft.id === openedDraft.id) ? (
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">This draft is no longer available from the current Trusted Admins.</p>
-              <Button variant="outline" onClick={handleCancelForm}>Close draft</Button>
-            </div>
-          ) : <EventForm
+          {openedDraft && !drafts.data?.some((draft) => draft.id === openedDraft.id) && (
+            <p role="alert" className="mb-4 text-sm text-muted-foreground">This draft is no longer available from the current Trusted Admins. Your unsaved fields are retained below.</p>
+          )}
+          <EventForm
             key={openedDraft?.id ?? editingEvent?.event.id ?? 'new'}
             savedDraft={openedDraft?.fields}
-            onSaveDraft={drafts.saveDraft}
+            onSaveDraft={(fields) => drafts.saveDraft(fields, openedDraft)}
+            onLoadLatestDraft={setOpenedDraft}
             existing={editingEvent}
             templateToLoad={templateToLoad}
             onSuccess={handleFormSuccess}
             onCancel={handleCancelForm}
             onSaveTemplate={handleSaveTemplate}
-          />}
+          />
         </div>
       ) : (
         <Button

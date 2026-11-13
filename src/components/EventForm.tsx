@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select';
 import { Loader2, Plus, X, Save, Upload, Calendar } from 'lucide-react';
 import type { ScheduleEvent } from '@/lib/schedule-event';
+import { StaleEventDraftError, type SharedEventDraft } from '@/lib/shared-event-drafts';
 import {
   createEventDraft,
   draftFromScheduleEvent,
@@ -42,9 +43,10 @@ interface EventFormProps {
   onSaveTemplate?: (name: string, draft: EventDraft) => void;
   onSaveDraft?: (draft: EventDraft) => Promise<void>;
   savedDraft?: EventDraft;
+  onLoadLatestDraft?: (draft: SharedEventDraft) => void;
 }
 
-export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveDraft, savedDraft }: EventFormProps) {
+export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSaveTemplate, onSaveDraft, savedDraft, onLoadLatestDraft }: EventFormProps) {
   const { publishDraft, isPending } = useEventAuthoring();
   const { mutateAsync: uploadFile, isPending: isUploading } = useUploadFile();
   const { user } = useCurrentUser();
@@ -56,6 +58,8 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
 
   const [form, setForm] = useState<EventDraft>(() => savedDraft ?? createEventDraft(defaultTz));
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [latestDraft, setLatestDraft] = useState<SharedEventDraft>();
+  const [unsavedCopies, setUnsavedCopies] = useState<EventDraft[]>([]);
 
   useEffect(() => {
     if (savedDraft) setForm({ ...savedDraft, links: [...savedDraft.links] });
@@ -198,6 +202,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
       onSuccess?.();
     } catch (error) {
       console.error('Failed to save draft:', error);
+      if (error instanceof StaleEventDraftError) setLatestDraft(error.latest);
       toast({ title: 'Could not save draft', description: error instanceof Error ? error.message : 'Check your relays and try again.', variant: 'destructive' });
     } finally {
       setIsSavingDraft(false);
@@ -206,7 +211,21 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      <fieldset disabled={Boolean(savedDraft) || isSavingDraft || isPending} className="space-y-5">
+      {latestDraft && <div role="alert" className="space-y-3 rounded-lg border border-primary/30 p-4">
+        <p className="text-sm">This draft has changed. Load the latest draft before saving. A copy of your unsaved fields will remain below for reconciliation.</p>
+        <Button type="button" variant="outline" disabled={isSavingDraft} onClick={() => {
+          setUnsavedCopies((copies) => [...copies, { ...form, links: [...form.links] }]);
+          setForm({ ...latestDraft.fields, links: [...latestDraft.fields.links] });
+          onLoadLatestDraft?.(latestDraft);
+          setLatestDraft(undefined);
+        }}>Load latest draft</Button>
+      </div>}
+      {unsavedCopies.length > 0 && <div className="space-y-2">
+        <Label htmlFor="ev-unsaved">Your unsaved fields</Label>
+        <p className="text-sm text-muted-foreground">Copy any changes you want to keep into the latest draft below. Copies are retained until you save or close this form.</p>
+        <Textarea id="ev-unsaved" readOnly rows={8} value={JSON.stringify(unsavedCopies, null, 2)} />
+      </div>}
+      <fieldset disabled={isSavingDraft || isPending} className="space-y-5">
       <div className="space-y-1.5">
         <Label htmlFor="ev-title" className="font-condensed font-600 uppercase text-xs tracking-wide">
           Title <span className="text-primary">*</span>
@@ -296,7 +315,7 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
         <Label htmlFor="ev-tzid" className="font-condensed font-600 uppercase text-xs tracking-wide">
           Timezone
         </Label>
-        <Select value={form.tzid} onValueChange={(value) => { if (value) setField('tzid', value); }} disabled={Boolean(savedDraft) || isSavingDraft || isPending}>
+        <Select value={form.tzid} onValueChange={(value) => { if (value) setField('tzid', value); }} disabled={isSavingDraft || isPending}>
           <SelectTrigger id="ev-tzid">
             <SelectValue>{US_TIMEZONES.find((tz) => tz.value === form.tzid)?.label ?? form.tzid}</SelectValue>
           </SelectTrigger>
@@ -456,8 +475,8 @@ export function EventForm({ existing, templateToLoad, onSuccess, onCancel, onSav
 
       </fieldset>
       <div className="flex flex-wrap gap-3 pt-2">
-        {!existing && !savedDraft && onSaveDraft && (
-          <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={isSavingDraft || isUploading || isPending}>
+        {!existing && onSaveDraft && (
+          <Button type="button" variant="outline" onClick={handleSaveDraft} disabled={Boolean(latestDraft) || isSavingDraft || isUploading || isPending}>
             {isSavingDraft && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             Save draft
           </Button>

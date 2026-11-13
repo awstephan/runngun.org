@@ -4,6 +4,19 @@ import { createEventDraft } from '@/lib/event-authoring';
 import { draftCreationEvent, readSharedEventDrafts } from '@/lib/shared-event-drafts';
 
 describe('shared Event Draft API', () => {
+  it('selects a trusted cross-admin revision while retaining creation provenance and honoring revocation', () => {
+    const fields = { ...createEventDraft('Europe/London'), title: 'Original' };
+    const root = finalizeEvent({ ...draftCreationEvent(fields), created_at: 100 }, generateSecretKey());
+    const revision = finalizeEvent({ ...draftCreationEvent({ ...fields, title: 'Edited', startDate: '' }), tags: [
+      ['t', 'runngun-event-draft'], ['version', '1'], ['op', 'revise'], ['title', 'Edited'],
+      ['start_tzid', 'Europe/London'], ['e', root.id, '', 'root'], ['e', root.id, '', 'previous'],
+    ], created_at: 101 }, generateSecretKey());
+    expect(readSharedEventDrafts([revision, root], [root.pubkey, revision.pubkey])[0]).toMatchObject({
+      id: root.id, creator: root.pubkey, event: revision, fields: { title: 'Edited', startDate: '', tzid: 'Europe/London' },
+    });
+    expect(readSharedEventDrafts([revision, root], [root.pubkey])[0].fields.title).toBe('Original');
+    expect(readSharedEventDrafts([revision, root], [revision.pubkey])).toEqual([]);
+  });
   it('reopens a title-only proposal from its signed creation record', () => {
     const fields = { ...createEventDraft('America/Chicago'), title: 'Spring proposal', startDate: '', startTime: '', endDate: '', endTime: '' };
     const event = finalizeEvent({ ...draftCreationEvent(fields), created_at: 100 }, generateSecretKey());

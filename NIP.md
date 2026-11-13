@@ -89,15 +89,36 @@ Only a nonblank title is required to save; NIP-52 validation belongs to publicat
 
 Discovery filters by kind, topic, and the authoritative current Trusted Admin
 authors, then validates signatures, schema, and creator trust again locally.
-Results are deduplicated by creation ID and ordered by descending `created_at`,
-then ascending event ID. No logged-in account owns the shared list. Revoking the
-creator hides the entire unpublished proposal. This first slice accepts creation
-records only and reopens them read-only; subsequent operations below are reserved
-for the remaining tickets, not interpreted by this implementation.
+Results are deduplicated by creation ID and ordered by the selected snapshot's
+descending `created_at`, then ascending event ID. No logged-in account owns the
+shared list. Revoking the creator hides the entire unpublished proposal.
+
+### Revisions (implemented)
+
+Any current Trusted Admin may save a full snapshot using `op=revise`. A revision
+requires exactly two `e` tags: `['e', '<creation ID>', '', 'root']` and
+`['e', '<loaded snapshot ID>', '', 'previous']`. Both IDs must be lowercase
+64-character hex. All creation field validation also applies to revisions.
+The verified creation record determines identity and creator; a revision never
+replaces them. Missing or untrusted creations cannot be reconstructed from revisions.
+
+Select the newest currently trusted snapshot (creation or revision), breaking
+timestamp ties by ascending ID. Publishers use at least one second after the
+loaded snapshot's timestamp so immediate successive saves advance the revision.
+The previous reference records observed ancestry, not a dependency on continued
+trust in every earlier editor; each full snapshot is its signer's contribution.
+Revoking an editor removes their snapshots and can reveal an earlier one.
+
+Before signing a revision, refresh authority and query the creation plus its
+contributions with current trusted-author filters. If the selected snapshot
+differs from the loaded base, stop and offer Load latest draft. Loading retains
+a copy of all unsaved fields for manual reconciliation. Refresh is best effort,
+not atomic: simultaneous revisions use the same deterministic ordering above.
+Unavailable drafts and failed saves keep the form mounted and its input intact.
 
 ### Follow-up operation contract
 
-Each future revision, dismissal, or consumption is a new kind `3523` record signed
+Each revision, future dismissal, or consumption is a new kind `3523` record signed
 by its actual contributor, with the same topic/version and an `op` of `revise`,
 `delete`, or `consume`. An `e` tag with marker `root` references the exact signed
 creation event ID; revisions also reference the loaded base event with marker
@@ -123,14 +144,17 @@ publications can produce duplicates; there are no locks or approval state.
 A kind number does not guarantee relay retention or public access. Saving first
 publishes using the connected signer and configured write relays, then opens
 separate **unauthenticated** connections to configured read/write relays. At
-least one must return the exact signed creation through a kind/author/topic/ID
+least one must return the exact signed snapshot through a kind/author/topic/ID
 query before the UI reports success. Connections are closed after bounded queries.
 An accepted write without anonymous readback is shown as unverified, retaining
-the form. The signed creation is retained before transmission, even when the
+the form. The signed snapshot is retained before transmission, even when the
 write acknowledgment fails. Retrying resends that same signed record to current
 write relays and rechecks public access. If fields changed, the previous save is
 reconciled first; the new input remains in the form and requires a separate Save
-draft click to create another proposal. Pending retries last for the mounted
+draft click to create another proposal (for creations) or reconcile with the
+latest revision (for edits). Revision retries refresh state first; a different
+winning revision requires reconciliation rather than retransmission. Pending
+retries are scoped to the signing account and draft. Pending retries last for the mounted
 workspace; after leaving it, refresh the shared list before recreating a proposal
 whose write outcome was uncertain.
 

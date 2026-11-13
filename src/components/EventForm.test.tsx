@@ -3,8 +3,28 @@ import { describe, expect, it, vi } from 'vitest';
 import { TestApp } from '@/test/TestApp';
 import { EventForm } from '@/components/EventForm';
 import { createEventDraft } from '@/lib/event-authoring';
+import { draftCreationEvent, readSharedEventDrafts, StaleEventDraftError } from '@/lib/shared-event-drafts';
+import { finalizeEvent, generateSecretKey } from 'nostr-tools';
 
 describe('Event Draft form', () => {
+  it('edits shared fields and retains unsaved input for reconciliation when loading the latest draft', async () => {
+    const fields = { ...createEventDraft('Europe/London'), title: 'Original', content: 'Original notes' };
+    const record = finalizeEvent({ ...draftCreationEvent({ ...fields, title: 'Remote title' }), created_at: 1 }, generateSecretKey());
+    const latest = readSharedEventDrafts([record], [record.pubkey])[0];
+    const save = vi.fn().mockRejectedValue(new StaleEventDraftError(latest));
+    const load = vi.fn();
+    render(<TestApp><EventForm savedDraft={fields} onSaveDraft={save} onLoadLatestDraft={load} /></TestApp>);
+    expect(screen.getByLabelText(/Title/)).toBeEnabled();
+    fireEvent.change(screen.getByLabelText(/Title/), { target: { value: 'My unsaved title' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+    await screen.findByRole('button', { name: 'Load latest draft' });
+    expect(screen.getByLabelText(/Title/)).toHaveValue('My unsaved title');
+    fireEvent.click(screen.getByRole('button', { name: 'Load latest draft' }));
+    expect(load).toHaveBeenCalledWith(latest);
+    expect(screen.getByLabelText(/Title/)).toHaveValue('Remote title');
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Your unsaved fields').value).toContain('My unsaved title');
+    expect(screen.getByLabelText('Timezone')).toHaveTextContent('Europe/London');
+  });
   it('reopens saved fields including their timezone without publishing or consuming', () => {
     const fields = { ...createEventDraft('Europe/London'), title: 'Shared proposal', startDate: '', content: 'Keep these notes' };
     const success = vi.fn();
