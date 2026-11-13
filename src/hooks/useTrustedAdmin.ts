@@ -69,7 +69,7 @@ function persistAuthority(authority: TrustedAdminAuthority): void {
   localStorage.removeItem('runngun:admin-list');
 }
 
-export function useTrustedAdmin() {
+export function useTrustedAdmin(options: { refetchInterval?: number } = {}) {
   const { nostr } = useNostr();
   const authorityQuery = useQuery({
     queryKey: AUTHORITY_QUERY_KEY,
@@ -95,6 +95,7 @@ export function useTrustedAdmin() {
     },
     staleTime: 60_000,
     refetchOnMount: true,
+    refetchInterval: options.refetchInterval,
   });
 
   const authority = authorityQuery.data;

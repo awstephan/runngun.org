@@ -126,7 +126,13 @@ separate **unauthenticated** connections to configured read/write relays. At
 least one must return the exact signed creation through a kind/author/topic/ID
 query before the UI reports success. Connections are closed after bounded queries.
 An accepted write without anonymous readback is shown as unverified, retaining
-the form; retrying unchanged fields rechecks that same signed record.
+the form. The signed creation is retained before transmission, even when the
+write acknowledgment fails. Retrying resends that same signed record to current
+write relays and rechecks public access. If fields changed, the previous save is
+reconciled first; the new input remains in the form and requires a separate Save
+draft click to create another proposal. Pending retries last for the mounted
+workspace; after leaving it, refresh the shared list before recreating a proposal
+whose write outcome was uncertain.
 
 Other admins must have a read relay in common with a relay holding the record;
 no client can guarantee propagation or permanent retention on arbitrary relays.

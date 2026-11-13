@@ -5,11 +5,23 @@ import { useCurrentUser } from "./useCurrentUser";
 
 import type { NostrEvent } from "@nostrify/nostrify";
 
-export function useNostrPublish(): UseMutationResult<NostrEvent> {
+interface PublishOptions {
+  /** Retain the signed event before transmission so an uncertain write can be retried. */
+  onSigned?: (event: NostrEvent) => void;
+}
+
+export function useNostrPublish(options: PublishOptions = {}): UseMutationResult<NostrEvent> & {
+  republish: (event: NostrEvent) => Promise<void>;
+} {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
 
-  return useMutation({
+  const republish = async (event: NostrEvent): Promise<void> => {
+    if (!user || event.pubkey !== user.pubkey) throw new Error('Only the signing account can retry this publication');
+    await nostr.event(event, { signal: AbortSignal.timeout(5000) });
+  };
+
+  const mutation = useMutation({
     mutationFn: async (t: Omit<NostrEvent, 'id' | 'pubkey' | 'sig'>) => {
       if (user) {
         const tags = t.tags ?? [];
@@ -26,7 +38,8 @@ export function useNostrPublish(): UseMutationResult<NostrEvent> {
           created_at: t.created_at ?? Math.floor(Date.now() / 1000),
         });
 
-        await nostr.event(event, { signal: AbortSignal.timeout(5000) });
+        options.onSigned?.(event);
+        await republish(event);
         return event;
       } else {
         throw new Error("User is not logged in");
@@ -39,4 +52,5 @@ export function useNostrPublish(): UseMutationResult<NostrEvent> {
       console.log("Event published successfully:", data);
     },
   });
+  return { ...mutation, republish };
 }

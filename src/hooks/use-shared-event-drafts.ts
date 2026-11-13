@@ -29,12 +29,15 @@ async function verifyPublicDraft(event: NostrEvent, urls: string[]): Promise<voi
 }
 
 export function useSharedEventDrafts() {
-  const trustedAdmin = useTrustedAdmin();
+  const trustedAdmin = useTrustedAdmin({ refetchInterval: 30_000 });
   const { user } = useCurrentUser();
   const { config } = useAppContext();
-  const publication = useNostrPublish();
   const queryClient = useQueryClient();
   const pending = useRef<{ event: NostrEvent; fields: string }>();
+  const submittedFields = useRef('');
+  const publication = useNostrPublish({
+    onSigned: (event) => { pending.current = { event, fields: submittedFields.current }; },
+  });
   const authority = trustedAdmin.authority;
   const isTrusted = trustedAdmin.accessFor(user?.pubkey).status === 'trusted-admin';
   const readUrls = config.relayMetadata.relays.filter((relay) => relay.read).map((relay) => relay.url).sort();
@@ -58,16 +61,18 @@ export function useSharedEventDrafts() {
       if (!urls.length) throw new Error('Enable a public relay for both reading and writing in Relay settings.');
       const serialized = JSON.stringify(fields);
       if (pending.current?.event.pubkey !== user.pubkey) pending.current = undefined;
-      if (pending.current && pending.current.fields !== serialized) {
-        throw new Error('A previous save is awaiting public verification. Reopen its original fields or refresh the draft list before creating another draft.');
+      const changed = pending.current && pending.current.fields !== serialized;
+      if (pending.current) {
+        await publication.republish(pending.current.event);
+      } else {
+        submittedFields.current = serialized;
+        await publication.mutateAsync(draftCreationEvent(fields));
       }
-      if (!pending.current) {
-        const event = await publication.mutateAsync(draftCreationEvent(fields));
-        pending.current = { event, fields: serialized };
-      }
+      if (!pending.current) throw new Error('The signer did not return a draft record. Retry Save draft.');
       await verifyPublicDraft(pending.current.event, urls);
       pending.current = undefined;
       await queryClient.invalidateQueries({ queryKey: ['shared-event-drafts'] });
+      if (changed) throw new Error('Previous draft is now saved. Your current fields are retained; choose Save draft again to create another proposal.');
     },
     onError: (error) => console.error('Failed to save shared Event Draft:', error),
   });

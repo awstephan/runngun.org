@@ -14,12 +14,17 @@ const network = vi.hoisted(() => ({
   logins: [] as ReturnType<typeof NLogin.fromNsec>[],
   publicRead: true,
   writes: 0,
+  failWrite: false,
 }));
 vi.mock('@nostrify/react', async (original) => ({
   ...await original<typeof import('@nostrify/react')>(),
   useNostr: () => ({ nostr: {
     query: async (filters: NostrFilter[]) => network.events.filter((event) => matchFilters(filters, event)),
-    event: async (event: NostrEvent) => { network.events.push(event); network.writes++; },
+    event: async (event: NostrEvent) => {
+      if (!network.events.some((stored) => stored.id === event.id)) network.events.push(event);
+      network.writes++;
+      if (network.failWrite) throw new Error('Acknowledgment timed out');
+    },
   } }),
 }));
 vi.mock('@nostrify/react/login', async (original) => ({
@@ -51,6 +56,7 @@ beforeEach(() => {
   network.events = [];
   network.writes = 0;
   network.publicRead = true;
+  network.failWrite = false;
   network.logins = [NLogin.fromNsec(nip19.nsecEncode(alice))];
   setAuthority([alicePubkey, bobPubkey]);
 });
@@ -73,8 +79,10 @@ describe('shared Event Draft persistence', () => {
     network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, outsider));
     network.events.push(finalizeEvent({ ...draftCreationEvent(fields), created_at: 1 }, alice));
     network.logins = [NLogin.fromNsec(nip19.nsecEncode(bob))];
-    setAuthority([bobPubkey]);
     const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.data).toHaveLength(1));
+    setAuthority([bobPubkey]);
+    await act(async () => { await hook.result.current.refreshDrafts(); });
     await waitFor(() => expect(hook.result.current.data).toEqual([]));
     hook.unmount();
     network.logins = [NLogin.fromNsec(nip19.nsecEncode(alice))];
@@ -90,7 +98,29 @@ describe('shared Event Draft persistence', () => {
     await act(async () => { await expect(hook.result.current.saveDraft(fields)).rejects.toThrow('public access'); });
     network.publicRead = true;
     await act(async () => { await hook.result.current.saveDraft(fields); });
-    expect(network.writes).toBe(1);
+    expect(network.writes).toBe(2);
     expect(hook.result.current.data).toHaveLength(1);
+  });
+
+  it('reuses the signed creation after an ambiguous write failure', async () => {
+    network.failWrite = true;
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+    await act(async () => { await expect(hook.result.current.saveDraft(fields)).rejects.toThrow('timed out'); });
+    network.failWrite = false;
+    await act(async () => { await hook.result.current.saveDraft(fields); });
+    expect(hook.result.current.data).toHaveLength(1);
+  });
+
+  it('reconciles a previous save before allowing a changed proposal without discarding new input', async () => {
+    network.publicRead = false;
+    const hook = renderHook(useSharedEventDrafts, { wrapper: TestApp });
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+    await act(async () => { await expect(hook.result.current.saveDraft(fields)).rejects.toThrow('public access'); });
+    network.publicRead = true;
+    const changed = { ...fields, title: 'Another proposal' };
+    await act(async () => { await expect(hook.result.current.saveDraft(changed)).rejects.toThrow('Previous draft is now saved'); });
+    await act(async () => { await hook.result.current.saveDraft(changed); });
+    expect(hook.result.current.data?.map((draft) => draft.fields.title).sort()).toEqual(['Another proposal', 'Shared proposal']);
   });
 });
