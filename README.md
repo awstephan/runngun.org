@@ -2,7 +2,7 @@
 
 A Nostr-powered schedule for Run & Gun shooting and multi-sport events.
 
-Run & Gun publishes a trusted community event schedule as NIP-52 time-based calendar events. Visitors can browse upcoming, in-progress, and past events through schedule, calendar, map, RSS, and NIP-19 detail views. Trusted Admins use the Nostr-authenticated admin panel to publish their own events and reusable templates.
+Run & Gun publishes a trusted community event schedule as NIP-52 time-based calendar events. Visitors can browse upcoming, in-progress, and past events through schedule, calendar, map, RSS, and NIP-19 detail views. Trusted Admins use the Nostr-authenticated admin panel to collaborate on shared drafts and publish their own events and reusable templates.
 
 Repository: [github.com/awstephan/runngun.org](https://github.com/awstephan/runngun.org)
 
@@ -52,6 +52,14 @@ Repository: [github.com/awstephan/runngun.org](https://github.com/awstephan/runn
 - Current Trusted Admin templates are aggregated deterministically
 - Only the template creator may update or delete it
 
+### Shared Event Drafts
+
+- Save incomplete proposals without adding them to the public schedule
+- Any current Trusted Admin can edit, delete, or publish a shared draft
+- Publication creates a Schedule Event owned by the publisher and consumes the draft
+- Draft records are publicly readable on Nostr and retain their original creator
+- Conflict checks and recovery controls help resolve concurrent edits and uncertain publications
+
 ### Community and Payments
 
 - NIP-52 event RSVPs (`kind 31925`)
@@ -77,6 +85,7 @@ Repository: [github.com/awstephan/runngun.org](https://github.com/awstephan/runn
 | Data | NIP | Kind | Identity |
 |---|---:|---:|---|
 | Schedule Event | 52 | `31923` | Author + event `d` tag |
+| Shared Event Draft | Application-specific | `3523` | Signed creation event ID |
 | Event RSVP | 52 | `31925` | RSVP `d` tag and Schedule Event `a` tag |
 | Trusted Admins | 78 | `30078` | Site Owner + `runngun-admin-list` |
 | Event Templates | 78 | `30078` | Template author + `runngun-event-templates` |
@@ -84,7 +93,7 @@ Repository: [github.com/awstephan/runngun.org](https://github.com/awstephan/runn
 | Relay List | 65 | `10002` | User pubkey |
 | Zap Request / Receipt | 57 | `9734` / `9735` | Target event or profile |
 
-Application-specific NIP-78 schemas are documented in [`NIP.md`](./NIP.md). Every trusted addressable query includes its expected author; relays are never trusted to establish administrative authority by themselves.
+Application-specific schemas are documented in [`NIP.md`](./NIP.md). Every trusted addressable query includes its expected author; relays are never trusted to establish administrative authority by themselves.
 
 ## Architecture
 
@@ -102,11 +111,13 @@ src/
 │   ├── useScheduleEvents.ts  Trusted Schedule Event retrieval
 │   ├── useEventAuthoring.ts  Publication and deletion sequencing
 │   ├── useEventTemplates.ts  Per-author template persistence
+│   ├── use-shared-event-drafts.ts  Shared draft workflow and recovery
 │   ├── useLocationResolutions.ts
 │   └── useLocationCuration.ts
 ├── lib/
 │   ├── schedule-event.ts     NIP-52 interpretation and lifecycle
 │   ├── event-authoring.ts    Draft conversion, validation, and encoding
+│   ├── shared-event-drafts.ts  Shared draft records and interpretation
 │   ├── location-resolution.ts
 │   └── config.ts             Site Owner and NIP-78 identifiers
 ├── rss/
@@ -122,7 +133,7 @@ src/
 └── test/                     Shared Vitest setup
 ```
 
-Domain terminology lives in [`CONTEXT.md`](./CONTEXT.md). Architectural decisions are recorded in [`docs/adr/`](./docs/adr/).
+Domain terminology lives in [`GLOSSARY.md`](./GLOSSARY.md). Architectural decisions are recorded in [`docs/adr/`](./docs/adr/).
 
 ## Tech Stack
 
@@ -237,6 +248,7 @@ Keep `/rss.xml` outside the SPA fallback. Run the generator once before enabling
 - Addressable Schedule Event routes filter by both author and `d` tag.
 - The Site Owner is the only identity that can appoint admins or curate shared Location Resolutions.
 - Schedule Events and Event Templates retain author ownership for mutation.
+- Shared Event Drafts accept contributions from current Trusted Admins; revocation can expose an earlier revision or undo a draft deletion.
 - Legacy browser admin lists are never treated as authority.
 - External URLs and images are sanitized before rendering where applicable.
 - The application uses a restrictive Content Security Policy in `index.html`.

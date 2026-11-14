@@ -1,6 +1,6 @@
 # Shared Event Drafts
 
-Status: agreed design; implementation pending.
+Status: implemented. The admin Events tab supports shared draft creation, editing, deletion, publication, and recovery of uncertain operations.
 
 ## Purpose
 
@@ -36,6 +36,6 @@ One Trusted Admin can prepare an Event Draft and another can edit and publish it
 
 ## Implementation boundary
 
-The storage schema and event kinds have not been selected. Cross-author editing and removal must be represented as authorized application actions, rather than assuming an admin can replace or delete another author's signed Nostr event. Document the chosen schema in `NIP.md` during implementation, after checking applicable NIPs and relay behavior.
+Drafts use independently signed regular kind `3523` records for creation, revisions, dismissal, and consumption. Cross-author actions preserve the original signed records. Publication creates a kind `31923` Schedule Event signed by the publisher. See [`NIP.md`](../NIP.md) for the schema, conflict handling, and recovery behavior.
 
 See [the shared-draft authority decision](adr/0004-share-drafts-without-transferring-event-ownership.md).
